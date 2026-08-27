@@ -17,6 +17,5 @@ wheels/
 uv.lock
 
 # Data (downloaded at runtime)
-data/pdfs/
-data/output/
+data/
 .DS_Store
