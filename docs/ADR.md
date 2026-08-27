@@ -21,3 +21,14 @@ Substituído o Ollama local pela API do Gemini (Google AI Studio), usando seu en
 
 **Consequências:**
 O pipeline passa a depender de acesso à internet e de uma chave de API externa, em vez de rodar totalmente offline. Em contrapartida, se torna executável em qualquer máquina, independentemente de capacidade de hardware, sem custo dentro do volume esperado (~10 livros).
+
+## ADR 003 — Sinalização de falha em traduções de descrição
+
+**Contexto:**
+O script `05_translate_descriptions.py` falha silenciosamente ao estourar o limite de requisições por minuto da API do Gemini (ver DQ-001 em `data-quality-log.md`), deixando traduções ausentes sem nenhuma sinalização de causa. Cada idioma (EN/ES/FR) é uma chamada de LLM independente e pode falhar por motivos diferentes dentro do mesmo livro.
+
+**Decisão:**
+Adicionada sinalização de status em dois níveis: um campo `status`/`reason` por idioma, registrando sucesso ou o motivo específico da falha de cada tradução individual, e um campo agregado `translation_complete` no nível do livro, resumindo se todas as traduções daquele registro foram concluídas com sucesso. O nível por idioma serve auditoria e retry preciso; o nível agregado serve como sinal simples de decisão para os estágios seguintes do pipeline, incluindo o pilar Event-Driven.
+
+**Consequências:**
+O `description_translations.json` passa a carregar mais estrutura por idioma, exigindo ajuste no formato lido pelo `07_localized_catalog.py`. Em contrapartida, ganha-se rastreabilidade real de falhas e uma base concreta para o pilar Event-Driven decidir quando avançar ou não para a próxima etapa.

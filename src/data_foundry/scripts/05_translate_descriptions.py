@@ -46,35 +46,60 @@ def main():
     else:
         translations = {}
 
-    entries = {k: v for k, v in descriptions.items() if v.get("description")}
     print(
-        f"Translating {len(entries)} descriptions to {', '.join(TARGET_LANGUAGES.values())}..."
+        f"Translating {len(descriptions)} descriptions to {', '.join(TARGET_LANGUAGES.values())}..."
     )
     print(f"Using model: {LLM_MODEL} via {LLM_BASE_URL}")
 
-    for i, (code, entry) in enumerate(entries.items()):
-        if code in translations:
-            print(f"[{i + 1}/{len(entries)}] {code} — already translated, skipping")
+    for i, (code, entry) in enumerate(descriptions.items()):
+        title = entry.get("title", code)
+
+        if translations.get(code, {}).get("translation_complete"):
+            print(f"[{i + 1}/{len(descriptions)}] {code} — already translated, skipping")
             continue
 
-        title = entry.get("title", code)
+        if entry.get("status") != "Success":
+            print(f"[{i + 1}/{len(descriptions)}] {title[:50]}... — skipped (description failed)")
+            translations[code] = {
+                "status": "Skipped",
+                "reason": "upstream_description_failed",
+                "translation_complete": False,
+            }
+            with open(trans_path, "w", encoding="utf-8") as f:
+                json.dump(translations, f, ensure_ascii=False, indent=2)
+            continue
+
         description = entry["description"]
-        print(f"[{i + 1}/{len(entries)}] {title[:50]}...")
+        print(f"[{i + 1}/{len(descriptions)}] {title[:50]}...")
 
         entry_translations = {"original": description}
         for lang_key, lang_name in TARGET_LANGUAGES.items():
             translated = translate_text(description, lang_name)
-            entry_translations[lang_key] = translated
             if translated:
-                print(f"  {lang_key}: {translated[:60]}")
+                entry_translations[lang_key] = {
+                "text": translated,
+                "status": "Success",
+                }
+                print(f"  {lang_key}: {translated[:60]}")            
+            else:
+                entry_translations[lang_key] = {
+                    "text": None,
+                    "status": "Failed",
+                    "reason": "LLM_error",
+                }
+                print(f"  {lang_key}: failed")
+
+        entry_translations["translation_complete"] = all(
+            entry_translations[lang]["status"] == "Success" for lang in TARGET_LANGUAGES
+        )
 
         translations[code] = entry_translations
 
         with open(trans_path, "w", encoding="utf-8") as f:
             json.dump(translations, f, ensure_ascii=False, indent=2)
 
-    translated = sum(1 for t in translations.values() if t.get("en"))
-    print(f"\nDone. {translated}/{len(translations)} descriptions translated.")
+    complete = sum(1 for t in translations.values() if t.get("translation_complete"))
+    print(f"\nDone. {complete}/{len(translations)} descriptions fully translated.")
     print(f"Output saved to {trans_path}")
 
 

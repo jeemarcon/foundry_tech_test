@@ -131,17 +131,27 @@ def main():
             descriptions[code] = {
                 "title": title,
                 "description": None,
-                "error": "render_failed",
+                "status": "Failed",
+                "reason": "render_failed"
             }
             continue
 
         meta = metadata.get(code)
         description = describe_document(images, title, meta)
 
-        descriptions[code] = {
-            "title": title,
-            "description": description,
-        }
+        if description:
+            descriptions[code] = {
+                        "title": title,
+                        "description": description,
+                        "status": "Success"
+                    }
+        else:
+            descriptions[code] = {
+                                    "title": title,
+                                    "description": description,
+                                    "status": "Failed",
+                                    "reason": "llm_error"
+                                }
 
         with open(desc_path, "w", encoding="utf-8") as f:
             json.dump(descriptions, f, ensure_ascii=False, indent=2)
