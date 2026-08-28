@@ -125,6 +125,11 @@ def parse_detail_page(html: str) -> dict:
                 metadata[current_field] = text
             current_field = None
 
+    if "year" not in metadata:
+        label_seen = any("Ano da Tese" in text for text in clean)
+        metadata["year_status"] = "empty_in_source" if label_seen else "label_not_found"
+
+
     return metadata
 
 

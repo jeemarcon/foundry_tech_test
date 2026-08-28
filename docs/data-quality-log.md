@@ -38,3 +38,60 @@ Please retry in 49.484914876s.
 **Solução:** Pular a busca da página de detalhe (`get_download_url_and_metadata`) para códigos que já existem no `metadata.json` salvo de uma execução anterior, reaproveitando os dados já coletados em vez de visitar a página de novo. A listagem (`LIST_URL`) continua sendo buscada a cada execução — ela não afeta o contador de acessos; só a visita à página de detalhe o faz. Essa correção não tem efeito na primeira execução, mas evita o incremento indevido em qualquer execução subsequente: reruns manuais durante desenvolvimento, testes, retomada após falha parcial no meio do processamento.
 
 **Nota de escopo:** essa solução parte da premissa de que este pipeline roda como um instantâneo único, sem execução periódica agendada considerando o escopo do case ("process at least 10 books", sem menção a recorrência). Num cenário de execução periódica real, a resposta correta não seria voltar a sobrescrever o catálogo a cada execução (isso reintroduziria tanto o risco de órfãos quanto a poluição do contador de acessos do site), seria buscar a listagem numa cadência definida e mesclar os códigos novos com o catálogo existente, preservando os registros já conhecidos. (upsert muito provavelmente)
+
+## DQ-003 — Campo "size" com valor incorreto na origem (01_download.py)
+
+**Identificado em:** 2026-08-28, revisando `catalog.json` manualmente após a raspagem.
+
+**Sintoma:** O livro de código `19322` ("Populações meridionais do Brasil") aparece com `size: "0.00 KB"` no `catalog.json`, apesar de ter sido baixado com sucesso (`downloaded: true`).
+
+**Evidência observada:**
+
+Entrada em `catalog.json`:
+```json
+{
+  "code": "19322",
+  "title": "Populações meridionais do Brasil",
+  "author": "Oliveira Viana",
+  "source": "[sf] Senado Federal",
+  "format": ".pdf",
+  "size": "0.00\r\n              KB",
+  "accesses": "9,469",
+  "download_url": "https://dominiopublico.mec.gov.br/pesquisa/DetalheObraDownload.do?select_action=&co_obra=19322&co_midia=2",
+  "downloaded": true
+}
+```
+
+Tamanho real do arquivo baixado, verificado via PowerShell:
+```
+Get-Item "data\pdfs\19322.pdf" | Select-Object Name, Length
+
+Name       Length
+----       ------
+19322.pdf 1356796
+```
+
+1.356.796 bytes (~1,3 MB) — muito distante do "0.00 KB" reportado pelo site.
+
+**Causa raiz:** O campo `size` do `catalog.json` vem direto da coluna de tamanho da página de listagem do site (`parse_listing`, `cells[6]`), sem nenhuma validação. É um valor exibido pelo próprio domínio público, e está incorreto na origem pra esse registro específico, as não reflete o arquivo real.
+
+**Pilares afetados:** Data Quality (dado presente e com formato válido, porém numericamente incorreto -> diferente de dado ausente). Também relevante porque `universal_metadata.json`, output final exigido pelo case, inclui "file size" como campo obrigatório — esse erro poderia vazar pro entregável final sem essa correção.
+
+**Solução:** Não implementada, por decisão consciente. Investiguei o caminho até o output final (`universal_metadata.json`) e foi confirmado que o campo com defeito no `catalog.json` não é propagado, a etapa de montagem final recalcula `size_bytes` a partir do `hashes.json` (ou, na ausência, do tamanho real do arquivo em disco), evidenciado por `"size_bytes": 1356796` no output final, batendo exatamente com o tamanho real medido do arquivo. Como o raio de impacto está comprovadamente contido antes de chegar ao entregável exigido, optamos por documentar o achado sem investir tempo corrigindo o campo `size` do `catalog.json` diretamente. Priorização consciente diante do prazo do case, não uma omissão.
+
+## DQ-004 — Campo "year" ausente para livros não-teses (01_download.py)
+
+**Identificado em:** 2026-08-28, revisando `universal_metadata.json` e notando `year: null` em todos os 10 registros.
+
+**Sintoma:** 100% dos livros no `universal_metadata.json` têm `year: null`.
+
+**Causa raiz:** O `parse_detail_page` procura o rótulo "Ano da Tese" (Year of the Thesis) pra popular o campo `year`. Esse rótulo aparece no template da página de detalhe independente do tipo de obra, mas só é preenchido de fato pra teses acadêmicas. Verificado manualmente no site (código 15713 e outros): o rótulo aparece, mas o valor ao lado está em branco na própria origem — confirma que não é falha de extração, é ausência real de dado na fonte, pra esse tipo de acervo ("História").
+
+**Pilares afetados:** Data Quality (avaliar se um dado ausente é defeito ou característica real da fonte, antes de tentar "corrigir").
+
+**Solução:** **Solução:** Mantido `null` no output final (`universal_metadata.json`) — decisão respaldada por pesquisa de boas práticas (ver fontes), que desaconselha preencher ausência real com um placeholder artificial. Adicionado, porém, um sinal leve e escopado no `metadata.json` intermediário (produzido pelo `01_download.py`): quando `year` não é extraído, `parse_detail_page` registra `year_status` como `"empty_in_source"` (rótulo "Ano da Tese" encontrado, valor em branco na origem — o caso confirmado aqui) ou `"label_not_found"` (rótulo nem apareceu, sinal de possível problema de extração real). Esse sinal não é propagado ao output final, servindo só como diagnóstico interno pra
+evitar repetir a investigação manual no site caso o mesmo padrão apareça de novo.
+
+**Fontes:**
+- https://sqlpad.io/tutorial/fill-missing-values-sql-coalesce-window-functions/
+- https://dqops.com/common-data-quality-issues/
