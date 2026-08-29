@@ -23,3 +23,7 @@ OUTPUT_DIR = DATA_DIR / "output"
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://localhost:11434/v1")
 LLM_API_KEY = os.getenv("LLM_API_KEY", "ollama")
 LLM_MODEL = os.getenv("LLM_MODEL", "gemma4:e2b")
+
+# Gemini free tier: 15 requests/minute (see DQ-001). 4.5s of spacing keeps any 10-call
+# stretch under that ceiling with a small margin, instead of relying only on retry-on-rerun.
+LLM_CALL_DELAY_SECONDS = 4.5

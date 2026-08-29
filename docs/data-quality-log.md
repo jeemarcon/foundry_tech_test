@@ -38,7 +38,7 @@ Exemplo do nulo no arquivo intermediário (código `19322`, `description_transla
 ```
 A lógica é a mesma do DQ-004: o valor ausente (`null`) é aceitável e correto no entregável final, quando a tradução de fato falhou. O  *porquê* da ausência é o que deve ficar registrado só na camada intermediária, não a estrutura de rastreabilidade em si. Corrigido com um helper `extract_text()` em `07_localized_catalog.py`, aplicado à extração de `title` e `description` em EN/ES/FR: retorna `value["text"]` quando o campo é um objeto de status/reason, ou o próprio valor quando já é string/null. `localized_catalog.json` volta a ter só valores de texto ou `null` em cada idioma, consistente com PT, sem carregar a estrutura de rastreabilidade até o entregável final. *(concluído)* Confirmado via reexecução manual: o código `19322` passou a mostrar `"es": null, "fr": null` no output final, em vez dos objetos aninhados.
 
-**Solução (Scalability)** (`extra/scalability-rate-limiting`): pausa/throttling entre chamadas ao LLM para respeitar o limite de requisições por minuto. *(a construir)*
+**Solução (Scalability)** (`feature/scalability`): pausa entre chamadas ao LLM (`LLM_CALL_DELAY_SECONDS`, 4.5s) em `03_describe.py`/`04_translate.py`/`05_translate_descriptions.py`, para respeitar o limite de requisições por minuto. *(concluído)* Confirmado via reexecução de `make translate`: o código `18957`, que antes tinha `es` falhando com erro 503, passou a mostrar `es`/`fr` como `"status": "Success"`, e os 10 livros completaram sem nenhum erro de LLM.
 
 ## DQ-002: Ranking de "mais acessados" é afetado pela própria raspagem (01_download.py)
 

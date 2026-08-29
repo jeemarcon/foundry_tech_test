@@ -1,5 +1,6 @@
 import base64
 import json
+import time
 from pathlib import Path
 
 import fitz
@@ -8,6 +9,7 @@ from openai import OpenAI
 from data_foundry.config import (
     LLM_API_KEY,
     LLM_BASE_URL,
+    LLM_CALL_DELAY_SECONDS,
     LLM_MODEL,
     OUTPUT_DIR,
     PDF_DIR,
@@ -98,6 +100,8 @@ def describe_document(
         return resp.choices[0].message.content.strip()
     except Exception as e:
         print(f"  LLM error: {e}")
+    finally:
+        time.sleep(LLM_CALL_DELAY_SECONDS)
     return None
 
 
