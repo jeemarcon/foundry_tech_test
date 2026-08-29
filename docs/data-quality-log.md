@@ -128,3 +128,17 @@ evitar repetir a investigação manual no site caso o mesmo padrão apareça de 
 **Propagação (se não corrigido):** alta. O arquivo inválido seria hasheado normalmente em `02_hash.py` (hash de um HTML, não do livro), poderia gerar erro silencioso ou descrição de baixa qualidade em `03_describe.py`/`06_covers.py` (o `fitz` pode falhar ao abrir ou renderizar lixo), e em `08_universal_metadata.py` teria `document_hash` e `size_bytes` preenchidos normalmente, parecendo um registro saudável no output final exigido pelo case.
 
 **Solução:** `download_pdf` passou a checar a assinatura do arquivo (`resp.content[:5] == b"%PDF-"`, os primeiros bytes de qualquer PDF válido) antes de gravar. Se a assinatura não bater, o conteúdo é descartado (nada é escrito em disco) e a função retorna `False`, deixando `downloaded: False` no `catalog.json`. Nenhum campo novo de status/reason foi necessário aqui: o mecanismo de retry em `main()` já decide se baixa de novo checando `pdf_path.exists()`, então bastou fazer essa checagem receber uma informação verdadeira. Antes, ela recebia um falso positivo. *(concluído)*
+
+## DQ-006: Cache de capa trata falha como definitiva, sem status/reason (06_covers.py)
+
+**Identificado em:** revisão de código, na mesma varredura sistemática do DQ-005 (achado preventivo, não incidente observado; conferido em `covers.json` real, os 10 livros extraíram capa com sucesso).
+
+**Sintoma:** `06_covers.py` usa `if code in covers: continue` para decidir se já processou aquele livro. Quando `extract_cover` falha, o código grava `covers[code] = None`, que já é uma chave presente no dicionário. Na prática, uma falha vira permanente: nenhuma execução futura tenta extrair aquela capa de novo, mesmo que a causa tenha sido transitória (ou corrigida, como no caso do DQ-005).
+
+**Causa raiz:** o mesmo padrão já corrigido em `04_translate.py` e presente originalmente em `05_translate_descriptions.py` antes do DQ-001: usar presença de chave como sinônimo de sucesso, em vez de checar o resultado da tentativa anterior. Aqui é mais pobre ainda, porque a falha nem carrega `status`/`reason`, só um `None` sem contexto.
+
+**Pilares afetados:** Data Quality (retry quebrado e ausência de rastreabilidade sobre por que uma capa não foi extraída).
+
+**Propagação:** alta e direta. `08_universal_metadata.py:48-49` faz `cover.get("path") if cover else None`; com `cover` igual a `None`, tanto `cover_path` quanto `cover_hash` viram `null` no `universal_metadata.json`, dois campos exigidos pelo case, indistinguíveis de "nunca foi tentado corretamente".
+
+**Solução:** a condição de skip passou a checar `(covers.get(code) or {}).get("status") == "Success"`, em vez de só a presença da chave. Sucesso e falha agora gravam um objeto com `status` (`"Success"` ou `"Failed"`, com `reason: "extraction_error"` no segundo caso), no mesmo formato usado em `03_describe.py`/`04_translate.py`/`05_translate_descriptions.py`. Entradas antigas do formato anterior (sem `status`) são reprocessadas uma vez e migram sozinhas pro novo formato. `08_universal_metadata.py` não precisou de nenhuma mudança: o `cover` de uma falha continua sendo um dicionário truthy com `path`/`hash` em `None`, produzindo o mesmo `null` de antes no output final. *(concluído)*

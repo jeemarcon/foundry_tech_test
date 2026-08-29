@@ -48,8 +48,8 @@ def main():
     for i, pdf in enumerate(pdf_files):
         code = pdf.stem
 
-        if code in covers:
-            print(f"[{i + 1}/{len(pdf_files)}] {code} — already extracted, skipping")
+        if (covers.get(code) or {}).get("status") == "Success":
+            print(f"[{i + 1}/{len(pdf_files)}] {code}, already extracted, skipping")
             continue
 
         print(f"[{i + 1}/{len(pdf_files)}] {code}...")
@@ -58,16 +58,22 @@ def main():
             covers[code] = {
                 "path": str(cover_path.relative_to(DATA_DIR)),
                 "hash": img_hash,
+                "status": "Success",
             }
             print(f"  → {cover_path.name}")
         else:
-            covers[code] = None
+            covers[code] = {
+                "path": None,
+                "hash": None,
+                "status": "Failed",
+                "reason": "extraction_error",
+            }
             print("  → Failed")
 
         with open(covers_path, "w", encoding="utf-8") as f:
             json.dump(covers, f, ensure_ascii=False, indent=2)
 
-    extracted = sum(1 for v in covers.values() if v)
+    extracted = sum(1 for v in covers.values() if isinstance(v, dict) and v.get("status") == "Success")
     print(f"\nDone. {extracted}/{len(covers)} covers extracted.")
     print(f"Output saved to {covers_path}")
 
