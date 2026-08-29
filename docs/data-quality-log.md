@@ -131,7 +131,7 @@ evitar repetir a investigação manual no site caso o mesmo padrão apareça de 
 
 ## DQ-006: Cache de capa trata falha como definitiva, sem status/reason (06_covers.py)
 
-**Identificado em:** revisão de código, na mesma varredura sistemática do DQ-005 (achado preventivo, não incidente observado; conferido em `covers.json` real, os 10 livros extraíram capa com sucesso).
+**Identificado em:** revisão de código, na mesma varredura sistemática do DQ-005 (achado preventivo, não incidente observado: conferido em `covers.json` real, os 10 livros extraíram capa com sucesso).
 
 **Sintoma:** `06_covers.py` usa `if code in covers: continue` para decidir se já processou aquele livro. Quando `extract_cover` falha, o código grava `covers[code] = None`, que já é uma chave presente no dicionário. Na prática, uma falha vira permanente: nenhuma execução futura tenta extrair aquela capa de novo, mesmo que a causa tenha sido transitória (ou corrigida, como no caso do DQ-005).
 
@@ -139,6 +139,24 @@ evitar repetir a investigação manual no site caso o mesmo padrão apareça de 
 
 **Pilares afetados:** Data Quality (retry quebrado e ausência de rastreabilidade sobre por que uma capa não foi extraída).
 
-**Propagação:** alta e direta. `08_universal_metadata.py:48-49` faz `cover.get("path") if cover else None`; com `cover` igual a `None`, tanto `cover_path` quanto `cover_hash` viram `null` no `universal_metadata.json`, dois campos exigidos pelo case, indistinguíveis de "nunca foi tentado corretamente".
+**Propagação:** alta e direta. `08_universal_metadata.py:48-49` faz `cover.get("path") if cover else None`, com `cover` igual a `None`, tanto `cover_path` quanto `cover_hash` viram `null` no `universal_metadata.json`, dois campos exigidos pelo case, indistinguíveis de "nunca foi tentado corretamente".
 
 **Solução:** a condição de skip passou a checar `(covers.get(code) or {}).get("status") == "Success"`, em vez de só a presença da chave. Sucesso e falha agora gravam um objeto com `status` (`"Success"` ou `"Failed"`, com `reason: "extraction_error"` no segundo caso), no mesmo formato usado em `03_describe.py`/`04_translate.py`/`05_translate_descriptions.py`. Entradas antigas do formato anterior (sem `status`) são reprocessadas uma vez e migram sozinhas pro novo formato. `08_universal_metadata.py` não precisou de nenhuma mudança: o `cover` de uma falha continua sendo um dicionário truthy com `path`/`hash` em `None`, produzindo o mesmo `null` de antes no output final. *(concluído)*
+
+## DQ-007: "Success" definido só por resposta não vazia, sem validar o conteúdo (03_describe.py)
+
+**Identificado em:** revisão de código (achado preventivo: conferindo as 10 descrições reais em `descriptions.json`, nenhuma aciona o definido abaixo).
+
+**Sintoma:** `descriptions[code]["status"] = "Success"` era decidido só por `if description:` (string não vazia), sem checar se o conteúdo faz sentido. Uma recusa da LLM de visão (ex.: "não consigo analisar esta imagem") ou uma resposta anormalmente curta contam como sucesso.
+
+**Causa raiz:** a validação existente é de forma (a chamada retornou algo), não de conteúdo. Como `05_translate_descriptions.py` só olha `status == "Success"` da etapa anterior, uma descrição ruim seria traduzida para EN/ES/FR normalmente, multiplicando o dado de baixa qualidade em 4 idiomas no `localized_catalog.json`, todos marcados como sucesso do início ao fim.
+
+**Pilares afetados:** Data Quality (validação de conteúdo, não só de forma, antes de propagar um dado como confiável).
+
+**Escopo consciente:** validar semanticamente se uma descrição está correta não é viável no prazo do case (isso seria, na prática, outro classificador). A solução aqui é uma heurística barata, não uma prova de qualidade: tamanho mínimo de 40 caracteres e uma lista curta de frases de recusa conhecidas em PT/EN. Reduz o risco, não elimina.
+
+**Decisão de design:** o achado da heurística vira um campo novo e separado, `quality_flag` (`"too_short"` ou `"possible_refusal"`), em vez de rebaixar `status` para `"Failed"`. `status` continua significando "a chamada ao LLM funcionou tecnicamente", `quality_flag` sinaliza "o conteúdo pode não ser confiável", sem misturar os dois conceitos. Consequência: uma descrição flagada ainda é traduzida em `05` e ainda aparece no `localized_catalog.json` normalmente, o sinal fica só em `descriptions.json`, para revisão manual (viável com 10 livros).
+
+**Solução:** adicionada a função `looks_suspicious()`, aplicada a toda descrição gerada com sucesso. Quando aciona, grava `quality_flag` junto do registro. Nenhuma das 10 descrições reais aciona a heurística hoje. *(concluído)*
+
+**Achado relacionado, mesmo arquivo:** a checagem de resume em `03_describe.py` (`if code in descriptions: continue`) tinha o mesmo defeito do DQ-006/DQ-001 antes da correção: não checava `status`, então uma descrição `"Failed"` (`render_failed` ou `llm_error`) ficava congelada para sempre. Corrigido para `descriptions.get(code, {}).get("status") == "Success"`, no mesmo padrão já usado em `04`/`05`/`06`. Corrigido também um efeito colateral encontrado ao ler o código: quando `render_failed` ocorria, um `continue` pulava o salvamento em disco daquela iteração, se fosse o último PDF do loop, a falha nunca era persistida. As duas correções foram unificadas num único ponto de salvamento por iteração.
