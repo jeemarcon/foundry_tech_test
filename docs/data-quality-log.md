@@ -4,11 +4,11 @@ Registro de problemas de qualidade de dados identificados durante o desenvolvime
 
 ## DQ-001 — Traduções de descrição faltantes para alguns livros
 
-**Identificado em:** 2026-08-27, execução de `make translate-descriptions`
+**Identificado em:** execução de `make translate-descriptions`
 
-**Sintoma:** Nem todos os livros tiveram suas descrições traduzidas para EN/ES/FR — alguns registros ficaram com campos de tradução nulos no `description_translations.json`, sem nenhuma sinalização de que houve falha.
+**Sintoma:** Nem todos os livros tiveram suas descrições traduzidas para EN/ES/FR — alguns registros ficaram com campos de tradução nulos no `description_translations.json`, sem nenhuma sinalização de que houve falha. O mesmo nulo, também sem sinalização, aparecia no `localized_catalog.json` — o output final exigido pelo case.
 
-**Causa raiz:** O script `05_translate_descriptions.py` dispara 3 chamadas ao LLM por livro (uma por idioma) em sequência, sem pausa entre elas. Com 10 livros, isso ultrapassa o limite de 15 requisições/minuto do tier gratuito da Gemini API (erro 429). O script não trata esse erro — descarta a tentativa e segue em frente.
+**Causa raiz:** O script `05_translate_descriptions.py` dispara 3 chamadas ao LLM por livro (uma por idioma) em sequência, sem pausa entre elas. Com 10 livros, isso ultrapassa o limite de 15 requisições/minuto do tier gratuito da Gemini API (erro 429). O script não trata esse erro, descarta a tentativa e segue em frente, deixando o campo daquele idioma nulo tanto no arquivo intermediário quanto, sem tratamento nenhum, no output final.
 
 **Evidência observada:**
 ```
@@ -17,15 +17,32 @@ limit: 15, model: gemini-3.5-flash-lite, quotaId: GenerateRequestsPerMinutePerPr
 Please retry in 49.484914876s.
 ```
 
+Exemplo do nulo no arquivo intermediário (código `19322`, `description_translations.json`):
+```json
+"es": {"text": null, "status": "Failed", "reason": "LLM_error"},
+"fr": {"text": null, "status": "Failed", "reason": "LLM_error"}
+```
+
 **Pilares afetados:** Data Quality (dado incompleto sem sinalização) e Scalability (rate limiting/backpressure ausente).
 
-**Solução — Data Quality** (`feature/data-quality`): sinalização explícita de status/reason por registro em `03_describe.py`, e status/reason por idioma + `translation_complete` agregado em `05_translate_descriptions.py`, em vez de falha silenciosa. *(concluído)*
+**Solução — Data Quality (rastreabilidade):** sinalização explícita de status/reason por registro em `03_describe.py`, e status/reason por idioma + `translation_complete` agregado em `05_translate_descriptions.py`, em vez de falha silenciosa. *(concluído)*
+
+**Solução — Data Quality (vazamento das colunas de rastreabilidade pro output final):** revisando o `localized_catalog.json` depois de pronto, notou-se que as próprias colunas de rastreabilidade criadas acima (`status`/`reason`) estavam se espelhando no output final, em vez de ficarem restritas ao arquivo intermediário. `07_localized_catalog.py` copiava `title`/`description` diretamente do JSON intermediário sem extrair o valor de texto de dentro do objeto de status/reason. PT (campo original, sem tradução) permanecia string simples, enquanto EN/ES/FR viravam objetos aninhados no output final, quebrando a consistência de tipo do schema:
+```json
+"description": {
+  "pt": "[...]",
+  "en": {"text": "[...]", "status": "Success", "reason": null},
+  "es": {"text": null, "status": "Failed", "reason": "LLM_error"},
+  "fr": {"text": null, "status": "Failed", "reason": "LLM_error"}
+}
+```
+A lógica é a mesma do DQ-004: o valor ausente (`null`) é aceitável e correto no entregável final, quando a tradução de fato falhou — o *porquê* da ausência é o que deve ficar registrado só na camada intermediária, não a estrutura de rastreabilidade em si. Corrigido com um helper `extract_text()` em `07_localized_catalog.py`, aplicado à extração de `title` e `description` em EN/ES/FR: retorna `value["text"]` quando o campo é um objeto de status/reason, ou o próprio valor quando já é string/null. `localized_catalog.json` volta a ter só valores de texto ou `null` em cada idioma, consistente com PT, sem carregar a estrutura de rastreabilidade até o entregável final. *(concluído)* Confirmado via reexecução manual: o código `19322` passou a mostrar `"es": null, "fr": null` no output final, em vez dos objetos aninhados.
 
 **Solução — Scalability** (`extra/scalability-rate-limiting`): pausa/throttling entre chamadas ao LLM para respeitar o limite de requisições por minuto. *(a construir)*
 
 ## DQ-002 — Ranking de "mais acessados" é afetado pela própria raspagem (01_download.py)
 
-**Identificado em:** 2026-08-27, executando `01_download.py` duas vezes seguidas, sem apagar o `catalog.json` gerado pela primeira execução.
+**Identificado em:** executando `01_download.py` duas vezes seguidas, sem apagar o `catalog.json` gerado pela primeira execução.
 
 **Sintoma:** Nenhum efeito visível ainda — os mesmos 10 livros voltaram, na mesma ordem, nas duas execuções. O que chamou atenção foi o campo `accesses`: subiu exatamente +1, em todos os dez livros, entre a primeira e a segunda execução.
 
@@ -41,7 +58,7 @@ Please retry in 49.484914876s.
 
 ## DQ-003 — Campo "size" com valor incorreto na origem (01_download.py)
 
-**Identificado em:** 2026-08-28, revisando `catalog.json` manualmente após a raspagem.
+**Identificado em:** revisão manual do `catalog.json` após a raspagem.
 
 **Sintoma:** O livro de código `19322` ("Populações meridionais do Brasil") aparece com `size: "0.00 KB"` no `catalog.json`, apesar de ter sido baixado com sucesso (`downloaded: true`).
 
@@ -81,7 +98,7 @@ Name       Length
 
 ## DQ-004 — Campo "year" ausente para livros não-teses (01_download.py)
 
-**Identificado em:** 2026-08-28, revisando `universal_metadata.json` e notando `year: null` em todos os 10 registros.
+**Identificado em:** revisão do `universal_metadata.json`, notando `year: null` em todos os 10 registros.
 
 **Sintoma:** 100% dos livros no `universal_metadata.json` têm `year: null`.
 
@@ -89,7 +106,7 @@ Name       Length
 
 **Pilares afetados:** Data Quality (avaliar se um dado ausente é defeito ou característica real da fonte, antes de tentar "corrigir").
 
-**Solução:** **Solução:** Mantido `null` no output final (`universal_metadata.json`) — decisão respaldada por pesquisa de boas práticas (ver fontes), que desaconselha preencher ausência real com um placeholder artificial. Adicionado, porém, um sinal leve e escopado no `metadata.json` intermediário (produzido pelo `01_download.py`): quando `year` não é extraído, `parse_detail_page` registra `year_status` como `"empty_in_source"` (rótulo "Ano da Tese" encontrado, valor em branco na origem — o caso confirmado aqui) ou `"label_not_found"` (rótulo nem apareceu, sinal de possível problema de extração real). Esse sinal não é propagado ao output final, servindo só como diagnóstico interno pra
+**Solução:** Mantido `null` no output final (`universal_metadata.json`) — decisão respaldada por pesquisa de boas práticas (ver fontes), que desaconselha preencher ausência real com um placeholder artificial. Adicionado, porém, um sinal leve e escopado no `metadata.json` intermediário (produzido pelo `01_download.py`): quando `year` não é extraído, `parse_detail_page` registra `year_status` como `"empty_in_source"` (rótulo "Ano da Tese" encontrado, valor em branco na origem — o caso confirmado aqui) ou `"label_not_found"` (rótulo nem apareceu, sinal de possível problema de extração real). Esse sinal não é propagado ao output final, servindo só como diagnóstico interno pra
 evitar repetir a investigação manual no site caso o mesmo padrão apareça de novo.
 
 **Fontes:**

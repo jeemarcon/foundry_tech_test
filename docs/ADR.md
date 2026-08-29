@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-## ADR 001 — Escolha dos pilares de entrega
+## ADR 001: Escolha dos pilares de entrega
 
 **Contexto:**
 O desafio exige a escolha de pelo menos 2 das 5 áreas de entrega definidas (Event-Driven Pipeline, Data Architecture, Versioning, Scalability, Data Quality), com avaliação focada em decisões de engenharia, não nos scripts fornecidos. Minha escolha considerou o conhecimento técnico e também alinhamento da vaga de Data Foundry Engineer.
@@ -11,7 +11,7 @@ Escolhidos os pilares Data Quality e Event-Driven Pipeline. Data Quality foi sel
 **Consequências:**
 A entrega ganha alinhamento direto com os requisitos técnicos da vaga e demonstra disposição para aprender fora da zona de conforto técnica atual. Em contrapartida, a execução em Event-Driven Pipeline envolve menor domínio prévio, exigindo mais tempo de estudo dentro do prazo do teste.
 
-## ADR 002 — Troca do provedor de LLM: Ollama local → Gemini API hospedada
+## ADR 002: Troca do provedor de LLM: Ollama local → Gemini API hospedada
 
 **Contexto:**
 O scaffold do case configura por padrão um LLM local via Ollama, orquestrado pelo `compose.yaml`, que reserva 16GB de RAM só para esse container. A máquina utilizada para desenvolvimento não suporta esse requisito e o próprio enunciado permite a troca de provedor de LLM via variáveis de ambiente (`LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`), sem necessidade de alterar o código dos scripts.
@@ -22,7 +22,7 @@ Substituído o Ollama local pela API do Gemini (Google AI Studio), usando seu en
 **Consequências:**
 O pipeline passa a depender de acesso à internet e de uma chave de API externa, em vez de rodar totalmente offline. Em contrapartida, se torna executável em qualquer máquina, independentemente de capacidade de hardware, sem custo dentro do volume esperado (~10 livros).
 
-## ADR 003 — Sinalização de falha em traduções de descrição
+## ADR 003: Sinalização de falha em traduções de descrição
 
 **Contexto:**
 O script `05_translate_descriptions.py` falha silenciosamente ao estourar o limite de requisições por minuto da API do Gemini (ver DQ-001 em `data-quality-log.md`), deixando traduções ausentes sem nenhuma sinalização de causa. Cada idioma (EN/ES/FR) é uma chamada de LLM independente e pode falhar por motivos diferentes dentro do mesmo livro.

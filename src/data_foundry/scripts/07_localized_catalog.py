@@ -10,6 +10,11 @@ def load_json(name: str) -> dict | list:
             return json.load(f)
     return {} if name != "catalog.json" else []
 
+def extract_text(value):
+    if isinstance(value, dict):
+        return value.get("text")
+    return value
+
 
 def main():
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -35,15 +40,15 @@ def main():
             "id": code,
             "title": {
                 "pt": entry["title"],
-                "en": title_trans.get("en"),
-                "es": title_trans.get("es"),
-                "fr": title_trans.get("fr"),
+                "en": extract_text(title_trans.get("en")),
+                "es": extract_text(title_trans.get("es")),
+                "fr": extract_text(title_trans.get("fr")),
             },
             "description": {
                 "pt": desc_data.get("description"),
-                "en": desc_trans.get("en"),
-                "es": desc_trans.get("es"),
-                "fr": desc_trans.get("fr"),
+                "en": extract_text(desc_trans.get("en")),
+                "es": extract_text(desc_trans.get("es")),
+                "fr": extract_text(desc_trans.get("fr")),
             },
             "author": entry.get("author"),
             "source": entry.get("source"),
