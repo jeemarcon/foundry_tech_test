@@ -1,8 +1,15 @@
 import json
+import time
 
 from openai import OpenAI
 
-from data_foundry.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, OUTPUT_DIR
+from data_foundry.config import (
+    LLM_API_KEY,
+    LLM_BASE_URL,
+    LLM_CALL_DELAY_SECONDS,
+    LLM_MODEL,
+    OUTPUT_DIR,
+)
 
 TARGET_LANGUAGES = {"en": "English", "es": "Spanish", "fr": "French"}
 
@@ -25,6 +32,8 @@ def translate_text(text: str, target_lang: str) -> str | None:
         return resp.choices[0].message.content.strip()
     except Exception as e:
         print(f"  LLM error: {e}")
+    finally:
+        time.sleep(LLM_CALL_DELAY_SECONDS)
     return None
 
 
