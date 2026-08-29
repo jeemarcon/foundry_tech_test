@@ -24,5 +24,6 @@ Registro cronológico de observações, ideias e conexões entre os pilares dura
 
 **Ideia:** Aplicar a mesma sinalização (status/reason por idioma) depois de fechar a descrição e a tradução de descrição, por consistência entre as duas etapas de tradução.
 
-**Status:** Capturado, adiado; retomar depois de `03_describe.py` e
-`05_translate_descriptions.py` estarem prontos.
+**Status:** Decidido e implementado, com `03_describe.py` e `05_translate_descriptions.py` já prontos. `04_translate.py` passou a gerar status/reason por idioma e `translation_complete` agregado, no mesmo formato de `05_translate_descriptions.py` (ver ADR 003). Diferença relevante: título não depende de uma etapa anterior gerada por LLM (vem direto do `catalog.json` raspado), então não existe aqui o caso "Skipped" por falha upstream, só "Success"/"Failed" por idioma.
+
+**Nota operacional:** como o formato de `translations.json` mudou (de string simples para objeto com status/reason), a checagem de idempotência (`translation_complete`) não reconhece entradas antigas já traduzidas no formato anterior. A próxima execução de `make translate` vai reprocessar os 10 títulos nos 3 idiomas (30 chamadas ao LLM), correndo o mesmo risco de estourar o limite de requisições por minuto documentado no DQ-001. Rodar com atenção ao rate limit até a pausa entre chamadas (Scalability) ser implementada.

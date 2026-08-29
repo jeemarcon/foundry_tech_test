@@ -82,10 +82,8 @@ def main():
         code = entry["code"]
         title = entry["title"]
 
-        if code in translations:
-            print(
-                f"[{i + 1}/{len(catalog)}] {title[:50]} — already translated, skipping"
-            )
+        if translations.get(code, {}).get("translation_complete"):
+            print(f"[{i + 1}/{len(catalog)}] {title[:50]}, already translated, skipping")
             continue
 
         print(f"[{i + 1}/{len(catalog)}] {title[:50]}...")
@@ -94,17 +92,31 @@ def main():
         entry_translations = {"original": title}
         for lang_key, lang_name in TARGET_LANGUAGES.items():
             translated = translate_title(title, lang_name, meta)
-            entry_translations[lang_key] = translated
             if translated:
+                entry_translations[lang_key] = {
+                    "text": translated,
+                    "status": "Success",
+                }
                 print(f"  {lang_key}: {translated[:60]}")
+            else:
+                entry_translations[lang_key] = {
+                    "text": None,
+                    "status": "Failed",
+                    "reason": "LLM_error",
+                }
+                print(f"  {lang_key}: failed")
+
+        entry_translations["translation_complete"] = all(
+            entry_translations[lang]["status"] == "Success" for lang in TARGET_LANGUAGES
+        )
 
         translations[code] = entry_translations
 
         with open(trans_path, "w", encoding="utf-8") as f:
             json.dump(translations, f, ensure_ascii=False, indent=2)
 
-    translated = sum(1 for t in translations.values() if t.get("en"))
-    print(f"\nDone. {translated}/{len(translations)} titles translated.")
+    complete = sum(1 for t in translations.values() if t.get("translation_complete"))
+    print(f"\nDone. {complete}/{len(translations)} titles fully translated.")
     print(f"Output saved to {trans_path}")
 
 
