@@ -10,6 +10,7 @@ from playwright.sync_api import sync_playwright
 from data_foundry.config import (
     BASE_URL,
     LIST_URL,
+    MIN_BOOKS,
     OUTPUT_DIR,
     PDF_DIR,
 )
@@ -124,6 +125,11 @@ def parse_detail_page(html: str) -> dict:
                 metadata[current_field] = text
             current_field = None
 
+    if "year" not in metadata:
+        label_seen = any("Ano da Tese" in text for text in clean)
+        metadata["year_status"] = "empty_in_source" if label_seen else "label_not_found"
+
+
     return metadata
 
 
@@ -157,8 +163,11 @@ def download_pdf(url: str, filepath: Path) -> bool:
     try:
         resp = SESSION.get(url, timeout=120)
         if resp.status_code == 200 and len(resp.content) > 1000:
-            filepath.write_bytes(resp.content)
-            return True
+            if resp.content[:5] == b"%PDF-":
+                filepath.write_bytes(resp.content)
+                return True
+            reason = "html_response" if resp.content.lstrip()[:1] == b"<" else "invalid_pdf_signature"
+            print(f"  Response is not a valid PDF ({reason}), discarding")
     except Exception as e:
         print(f"  Download error: {e}")
     return False
@@ -168,18 +177,39 @@ def main():
     PDF_DIR.mkdir(parents=True, exist_ok=True)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    print("Fetching listing page...")
-    html = fetch_page(LIST_URL)
-    if not html:
-        print("Failed to fetch listing page.")
-        return
+    catalog_path = OUTPUT_DIR / "catalog.json"
+    existing_catalog = []
+    if catalog_path.exists():
+        with open(catalog_path, encoding="utf-8") as f:
+            existing_catalog = json.load(f)
 
-    entries = parse_listing(html)
-    print(f"Found {len(entries)} entries")
+    metadata_path = OUTPUT_DIR / "metadata.json"
+    if metadata_path.exists():
+        with open(metadata_path, encoding="utf-8") as f:
+            existing_metadata = json.load(f)
+    else:
+        existing_metadata = {}
 
-    if not entries:
-        print("No entries found. Check if page structure changed.")
-        return
+
+    if len(existing_catalog) >= MIN_BOOKS:
+        print(
+            f"Catalog already has {len(existing_catalog)} books (>= {MIN_BOOKS}), "
+            "skipping listing fetch"
+        )
+        entries = existing_catalog
+    else:
+        print("Fetching listing page...")
+        html = fetch_page(LIST_URL)
+        if not html:
+            print("Failed to fetch listing page.")
+            return
+
+        entries = parse_listing(html)
+        print(f"Found {len(entries)} entries")
+
+        if not entries:
+            print("No entries found. Check if page structure changed.")
+            return
 
     catalog = []
     all_metadata = {}
@@ -187,14 +217,20 @@ def main():
         code = entry["code"]
         print(f"[{i + 1}/{len(entries)}] {entry['title'][:60]}...")
 
-        download_url, detail_meta = get_download_url_and_metadata(code)
-        entry["download_url"] = download_url
+        if code in existing_metadata:
+            print("  Metadata already known, skipping detail page visit")
+            all_metadata[code] = existing_metadata[code]
+            download_url = existing_metadata[code].get("download_url")
 
-        all_metadata[code] = {
-            **detail_meta,
-            "code": code,
-            "download_url": download_url,
-        }
+        else:
+            download_url, detail_meta = get_download_url_and_metadata(code)            
+            all_metadata[code] = {
+                **detail_meta,
+                "code": code,
+                "download_url": download_url,
+            }
+
+        entry["download_url"] = download_url
 
         if download_url:
             pdf_path = PDF_DIR / f"{code}.pdf"
@@ -217,11 +253,10 @@ def main():
 
         catalog.append(entry)
 
-    catalog_path = OUTPUT_DIR / "catalog.json"
+    
     with open(catalog_path, "w", encoding="utf-8") as f:
         json.dump(catalog, f, ensure_ascii=False, indent=2)
 
-    metadata_path = OUTPUT_DIR / "metadata.json"
     with open(metadata_path, "w", encoding="utf-8") as f:
         json.dump(all_metadata, f, ensure_ascii=False, indent=2)
 

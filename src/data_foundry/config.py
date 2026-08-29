@@ -6,9 +6,11 @@ from dotenv import load_dotenv
 load_dotenv()
 
 BASE_URL = "https://dominiopublico.mec.gov.br/pesquisa"
+MIN_BOOKS = 10
+
 LIST_URL = (
     f"{BASE_URL}/ResultadoPesquisaObraForm.do?"
-    "first=10&skip=0&ds_titulo=&co_autor=&no_autor="
+    f"first={MIN_BOOKS}&skip=0&ds_titulo=&co_autor=&no_autor="
     "&co_categoria=41&pagina=1&select_action=Submit"
     "&co_midia=2&co_obra=&co_idioma="
     "&colunaOrdenar=NU_PAGE_HITS&ordem=desc"

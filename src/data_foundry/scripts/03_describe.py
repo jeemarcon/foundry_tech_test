@@ -42,6 +42,27 @@ def format_metadata(meta: dict) -> str:
     return "\n".join(parts)
 
 
+MIN_DESCRIPTION_LENGTH = 40
+REFUSAL_PATTERNS = [
+    "não consigo",
+    "não posso analisar",
+    "não é possível analisar",
+    "i cannot",
+    "i'm unable",
+    "i am unable",
+    "as an ai",
+]
+
+def looks_suspicious(text: str) -> str | None:
+    if len(text.strip()) < MIN_DESCRIPTION_LENGTH:
+        return "too_short"
+    lowered = text.lower()
+    for pattern in REFUSAL_PATTERNS:
+        if pattern in lowered:
+            return "possible_refusal"
+    return None
+
+
 def describe_document(
     images: list[str], title: str, metadata: dict | None = None
 ) -> str | None:
@@ -118,8 +139,8 @@ def main():
 
     for i, pdf in enumerate(pdf_files):
         code = pdf.stem
-        if code in descriptions:
-            print(f"[{i + 1}/{len(pdf_files)}] {code} — already described, skipping")
+        if descriptions.get(code, {}).get("status") == "Success":
+            print(f"[{i + 1}/{len(pdf_files)}] {code}, already described, skipping")
             continue
 
         title = catalog.get(code, {}).get("title", "Unknown")
@@ -131,27 +152,37 @@ def main():
             descriptions[code] = {
                 "title": title,
                 "description": None,
-                "error": "render_failed",
+                "status": "Failed",
+                "reason": "render_failed",
             }
-            continue
+        else:
+            meta = metadata.get(code)
+            description = describe_document(images, title, meta)
 
-        meta = metadata.get(code)
-        description = describe_document(images, title, meta)
-
-        descriptions[code] = {
-            "title": title,
-            "description": description,
-        }
+            if description:
+                descriptions[code] = {
+                    "title": title,
+                    "description": description,
+                    "status": "Success",
+                }
+                flag = looks_suspicious(description)
+                if flag:
+                    descriptions[code]["quality_flag"] = flag
+                    print(f"  Warning: description may be low quality ({flag})")
+                print(f"  → {description[:100]}...")
+            else:
+                descriptions[code] = {
+                    "title": title,
+                    "description": description,
+                    "status": "Failed",
+                    "reason": "llm_error",
+                }
+                print("  → No description generated")
 
         with open(desc_path, "w", encoding="utf-8") as f:
             json.dump(descriptions, f, ensure_ascii=False, indent=2)
 
-        if description:
-            print(f"  → {description[:100]}...")
-        else:
-            print("  → No description generated")
-
-    described = sum(1 for d in descriptions.values() if d.get("description"))
+    described = sum(1 for d in descriptions.values() if d.get("status") == "Success")
     print(f"\nDone. {described}/{len(descriptions)} documents described.")
     print(f"Output saved to {desc_path}")
 
