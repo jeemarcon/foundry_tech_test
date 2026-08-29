@@ -163,8 +163,11 @@ def download_pdf(url: str, filepath: Path) -> bool:
     try:
         resp = SESSION.get(url, timeout=120)
         if resp.status_code == 200 and len(resp.content) > 1000:
-            filepath.write_bytes(resp.content)
-            return True
+            if resp.content[:5] == b"%PDF-":
+                filepath.write_bytes(resp.content)
+                return True
+            reason = "html_response" if resp.content.lstrip()[:1] == b"<" else "invalid_pdf_signature"
+            print(f"  Response is not a valid PDF ({reason}), discarding")
     except Exception as e:
         print(f"  Download error: {e}")
     return False
