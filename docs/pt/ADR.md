@@ -1,5 +1,7 @@
 # Architecture Decision Records
 
+Registro das decisões de arquitetura tomadas durante o desenvolvimento do pipeline, contexto e consequências de cada uma.
+
 ## ADR 001: Escolha dos pilares de entrega
 
 **Contexto:**

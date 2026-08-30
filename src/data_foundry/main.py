@@ -7,7 +7,7 @@ from pathlib import Path
 
 SCRIPTS_DIR = Path(__file__).resolve().parent / "scripts"
 
-# Real dependency graph of the pipeline (see ADR 004 in docs/ADR.md). A stage
+# Real dependency graph of the pipeline (see ADR 004 in docs/en/ADR.md or docs/pt/ADR.md). A stage
 # only fires once every stage listed in "depends_on" has finished successfully;
 # stages with no dependency on each other (e.g. hash, describe, translate and
 # covers, which only depend on download) run in parallel. Declared in
