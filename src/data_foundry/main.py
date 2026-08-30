@@ -1,15 +1,17 @@
+import os
 import subprocess
 import sys
+import threading
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
 
 SCRIPTS_DIR = Path(__file__).resolve().parent / "scripts"
 
-# Grafo de dependência real do pipeline (ver ADR 004 em docs/ADR.md). Cada etapa
-# só dispara quando todas as etapas listadas em "depends_on" tiverem terminado
-# com sucesso; etapas sem dependência entre si (ex.: hash, describe, translate
-# e covers, que só dependem de download) rodam em paralelo. Declarado em ordem
-# topológica de propósito, mas a propagação de skip abaixo não depende disso.
+# Real dependency graph of the pipeline (see ADR 004 in docs/ADR.md). A stage
+# only fires once every stage listed in "depends_on" has finished successfully;
+# stages with no dependency on each other (e.g. hash, describe, translate and
+# covers, which only depend on download) run in parallel. Declared in
+# topological order on purpose, but the skip propagation below does not rely on that.
 STAGES = {
     "download": {
         "script": "01_download.py",
@@ -53,24 +55,48 @@ STAGES = {
     },
 }
 
+# Guards interleaved prints from concurrent stages: each stage's subprocess
+# output is captured and re-printed line by line with a [stage] prefix instead
+# of inheriting stdout directly, so parallel stages don't garble each other's
+# output in the console (see ADR 005).
+_print_lock = threading.Lock()
+
 
 def run_stage(stage: str) -> bool:
     info = STAGES[stage]
-    print(f"\n{'=' * 60}")
-    print(f"  {info['description']}")
-    print(f"  Running: {info['script']}")
-    print(f"{'=' * 60}\n")
+    tag = f"[{stage}]"
 
-    result = subprocess.run(
+    with _print_lock:
+        print(f"\n{tag} {'=' * 50}")
+        print(f"{tag} {info['description']}")
+        print(f"{tag} Running: {info['script']}")
+        print(f"{tag} {'=' * 50}\n")
+
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUNBUFFERED"] = "1"
+
+    process = subprocess.Popen(
         [sys.executable, str(SCRIPTS_DIR / info["script"])],
         cwd=str(SCRIPTS_DIR.parent),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
     )
-    return result.returncode == 0
+    for line in process.stdout:
+        with _print_lock:
+            print(f"{tag} {line.rstrip()}")
+    process.wait()
+    return process.returncode == 0
 
 
 def propagate_skips(state: dict) -> None:
-    """Marca como 'skipped' toda etapa pendente que dependa de algo que falhou
-    ou foi pulado. Roda até estabilizar, para não depender da ordem de STAGES."""
+    """Marks as 'skipped' every pending stage that depends on something that
+    failed or was skipped. Runs until it stabilizes, so it does not rely on
+    the order of STAGES."""
     changed = True
     while changed:
         changed = False
@@ -79,12 +105,12 @@ def propagate_skips(state: dict) -> None:
                 continue
             if any(state[dep] in ("failed", "skipped") for dep in info["depends_on"]):
                 state[stage] = "skipped"
-                print(f"\n[skip] {stage}: dependência não concluída com sucesso")
+                print(f"\n[skip] {stage}: dependency did not complete successfully")
                 changed = True
 
 
 def main():
-    print("Domínio Público Data Pipeline (dispatch orientado a dados)")
+    print("Domínio Público Data Pipeline (data-driven stage dispatch)")
     print("=" * 60)
 
     state = {stage: "pending" for stage in STAGES}
@@ -105,12 +131,12 @@ def main():
                 futures[executor.submit(run_stage, stage)] = stage
 
             if not futures:
-                # Nada rodando e nada ficou pronto, mas ainda há etapas pendentes:
-                # só acontece com um grafo de dependência inconsistente.
+                # Nothing running and nothing became ready, but stages are
+                # still pending: only happens with an inconsistent dependency graph.
                 for stage, status in state.items():
                     if status == "pending":
                         state[stage] = "skipped"
-                        print(f"\n[skip] {stage}: nunca ficou pronto (grafo inconsistente)")
+                        print(f"\n[skip] {stage}: never became ready (inconsistent graph)")
                 break
 
             done, _ = wait(list(futures.keys()), return_when=FIRST_COMPLETED)
