@@ -38,7 +38,8 @@ localized-catalog:
 universal-metadata:
 	uv run python src/data_foundry/scripts/08_universal_metadata.py
 
-run-all: download hash describe translate translate-descriptions covers localized-catalog universal-metadata
+run-all:
+	uv run python src/data_foundry/main.py
 
 test:
 	uv run pytest tests/ -v
