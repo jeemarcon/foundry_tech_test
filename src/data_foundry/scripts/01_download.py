@@ -159,18 +159,24 @@ def get_download_url_and_metadata(code: str) -> tuple[str | None, dict]:
     return None, metadata
 
 
-def download_pdf(url: str, filepath: Path) -> bool:
+def download_pdf(url: str, filepath: Path) -> tuple[bool, str | None]:
     try:
         resp = SESSION.get(url, timeout=120)
-        if resp.status_code == 200 and len(resp.content) > 1000:
-            if resp.content[:5] == b"%PDF-":
-                filepath.write_bytes(resp.content)
-                return True
-            reason = "html_response" if resp.content.lstrip()[:1] == b"<" else "invalid_pdf_signature"
-            print(f"  Response is not a valid PDF ({reason}), discarding")
+        if resp.status_code != 200:
+            print(f"  HTTP error ({resp.status_code}), discarding")
+            return False, "http_error"
+        if len(resp.content) <= 1000:
+            print("  Response too small, discarding")
+            return False, "response_too_small"
+        if resp.content[:5] == b"%PDF-":
+            filepath.write_bytes(resp.content)
+            return True, None
+        reason = "html_response" if resp.content.lstrip()[:1] == b"<" else "invalid_pdf_signature"
+        print(f"  Response is not a valid PDF ({reason}), discarding")
+        return False, reason
     except Exception as e:
         print(f"  Download error: {e}")
-    return False
+    return False, "request_exception"
 
 
 def main():
@@ -236,20 +242,23 @@ def main():
             pdf_path = PDF_DIR / f"{code}.pdf"
             if pdf_path.exists():
                 print(f"  Already downloaded: {pdf_path.name}")
-                entry["downloaded"] = True
+                entry["status"] = "Success"
+                entry["reason"] = None
             else:
-                success = download_pdf(download_url, pdf_path)
-                entry["downloaded"] = success
+                success, reason = download_pdf(download_url, pdf_path)
+                entry["status"] = "Success" if success else "Failed"
+                entry["reason"] = reason
                 if success:
                     print(
                         f"  Downloaded: {pdf_path.name} ({pdf_path.stat().st_size} bytes)"
                     )
                 else:
-                    print("  FAILED to download")
+                    print(f"  FAILED to download ({reason})")
                 time.sleep(1)
         else:
             print("  No download URL found")
-            entry["downloaded"] = False
+            entry["status"] = "Failed"
+            entry["reason"] = "no_download_url"
 
         catalog.append(entry)
 
@@ -260,7 +269,7 @@ def main():
     with open(metadata_path, "w", encoding="utf-8") as f:
         json.dump(all_metadata, f, ensure_ascii=False, indent=2)
 
-    downloaded = sum(1 for e in catalog if e.get("downloaded"))
+    downloaded = sum(1 for e in catalog if e.get("status") == "Success")
     print(f"\nDone. {downloaded}/{len(catalog)} PDFs downloaded.")
     print(f"Catalog saved to {catalog_path}")
     print(f"Metadata saved to {metadata_path}")
