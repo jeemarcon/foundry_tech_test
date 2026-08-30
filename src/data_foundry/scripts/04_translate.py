@@ -95,6 +95,17 @@ def main():
             print(f"[{i + 1}/{len(catalog)}] {title[:50]}, already translated, skipping")
             continue
 
+        if entry.get("status") != "Success":
+            print(f"[{i + 1}/{len(catalog)}] {title[:50]}... — skipped (download failed)")
+            translations[code] = {
+                "status": "Skipped",
+                "reason": "upstream_download_failed",
+                "translation_complete": False,
+            }
+            with open(trans_path, "w", encoding="utf-8") as f:
+                json.dump(translations, f, ensure_ascii=False, indent=2)
+            continue
+
         print(f"[{i + 1}/{len(catalog)}] {title[:50]}...")
 
         meta = metadata.get(code)
