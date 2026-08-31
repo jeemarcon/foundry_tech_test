@@ -23,7 +23,7 @@ def fetch_page(url: str) -> str | None:
         resp = SESSION.get(url, timeout=30)
         if resp.status_code == 200 and "challenge" not in resp.text[:500].lower():
             return resp.text
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 (boundary catch: logged, falls through to the Playwright fallback)
         print(f"  curl-cffi failed: {e}")
 
     return fetch_page_playwright(url)
@@ -39,7 +39,7 @@ def fetch_page_playwright(url: str) -> str | None:
             html = page.content()
             browser.close()
             return html
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 (boundary catch: logged, page returns None instead of crashing the run)
         print(f"  Playwright fallback failed: {e}")
     return None
 
@@ -129,7 +129,6 @@ def parse_detail_page(html: str) -> dict:
         label_seen = any("Ano da Tese" in text for text in clean)
         metadata["year_status"] = "empty_in_source" if label_seen else "label_not_found"
 
-
     return metadata
 
 
@@ -171,10 +170,14 @@ def download_pdf(url: str, filepath: Path) -> tuple[bool, str | None]:
         if resp.content[:5] == b"%PDF-":
             filepath.write_bytes(resp.content)
             return True, None
-        reason = "html_response" if resp.content.lstrip()[:1] == b"<" else "invalid_pdf_signature"
+        reason = (
+            "html_response"
+            if resp.content.lstrip()[:1] == b"<"
+            else "invalid_pdf_signature"
+        )
         print(f"  Response is not a valid PDF ({reason}), discarding")
         return False, reason
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 (boundary catch: logged, converted to an explicit Failed status/reason for this record instead of crashing the batch)
         print(f"  Download error: {e}")
     return False, "request_exception"
 
@@ -195,7 +198,6 @@ def main():
             existing_metadata = json.load(f)
     else:
         existing_metadata = {}
-
 
     if len(existing_catalog) >= MIN_BOOKS:
         print(
@@ -229,7 +231,7 @@ def main():
             download_url = existing_metadata[code].get("download_url")
 
         else:
-            download_url, detail_meta = get_download_url_and_metadata(code)            
+            download_url, detail_meta = get_download_url_and_metadata(code)
             all_metadata[code] = {
                 **detail_meta,
                 "code": code,
@@ -262,7 +264,6 @@ def main():
 
         catalog.append(entry)
 
-    
     with open(catalog_path, "w", encoding="utf-8") as f:
         json.dump(catalog, f, ensure_ascii=False, indent=2)
 

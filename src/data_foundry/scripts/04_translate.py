@@ -50,7 +50,7 @@ def translate_title(
         if "\n" in result:
             result = result.split("\n")[0].strip()
         return result
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 (boundary catch: logged, converted to an explicit Failed status/reason for this record instead of crashing the batch)
         print(f"  LLM error: {e}")
     finally:
         time.sleep(LLM_CALL_DELAY_SECONDS)
@@ -92,11 +92,15 @@ def main():
         title = entry["title"]
 
         if translations.get(code, {}).get("translation_complete"):
-            print(f"[{i + 1}/{len(catalog)}] {title[:50]}, already translated, skipping")
+            print(
+                f"[{i + 1}/{len(catalog)}] {title[:50]}, already translated, skipping"
+            )
             continue
 
         if entry.get("status") != "Success":
-            print(f"[{i + 1}/{len(catalog)}] {title[:50]}... — skipped (download failed)")
+            print(
+                f"[{i + 1}/{len(catalog)}] {title[:50]}... — skipped (download failed)"
+            )
             translations[code] = {
                 "status": "Skipped",
                 "reason": "upstream_download_failed",

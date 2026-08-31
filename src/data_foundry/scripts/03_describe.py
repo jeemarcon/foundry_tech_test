@@ -31,7 +31,7 @@ def pdf_pages_to_base64(pdf_path: Path, max_pages: int = MAX_PAGES) -> list[str]
             b64 = base64.b64encode(png_bytes).decode("utf-8")
             images.append(b64)
         doc.close()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 (boundary catch: logged, returns an empty page list for this record instead of crashing the batch)
         print(f"  Error rendering PDF: {e}")
     return images
 
@@ -54,6 +54,7 @@ REFUSAL_PATTERNS = [
     "i am unable",
     "as an ai",
 ]
+
 
 def looks_suspicious(text: str) -> str | None:
     if len(text.strip()) < MIN_DESCRIPTION_LENGTH:
@@ -98,7 +99,7 @@ def describe_document(
             timeout=120,
         )
         return resp.choices[0].message.content.strip()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 (boundary catch: logged, converted to an explicit Failed status/reason for this record instead of crashing the batch)
         print(f"  LLM error: {e}")
     finally:
         time.sleep(LLM_CALL_DELAY_SECONDS)
