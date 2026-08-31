@@ -84,9 +84,9 @@ The pipeline is composed of 8 independent scripts under `src/data_foundry/script
 08_universal_metadata  depends on: 01_download, 02_hash, 06_covers
 ```
 
-`02_hash`, `03_describe`, `04_translate` and `06_covers` only depend on `01_download` and not on each other, so they run in parallel via a thread pool as soon as the download stage succeeds. `08_universal_metadata` fires as soon as `02_hash` and `06_covers` are done, without waiting for the translation stages it does not depend on. If a stage fails or is skipped, every stage that depends on it (directly or transitively) is marked as skipped in cascade, instead of the whole pipeline stopping.
+`02_hash`, `03_describe`, `04_translate` and `06_covers` only depend on `01_download` and not on each other, so they run in parallel via a thread pool as soon as the download stage succeeds. `05_translate_descriptions` follows right after, once `03_describe` finishes, since it depends on that stage's output. `08_universal_metadata` fires as soon as `02_hash` and `06_covers` are done, without waiting for the translation stages it does not depend on. If a stage fails or is skipped, every stage that depends on it (directly or transitively) is marked as skipped in cascade, instead of the whole pipeline stopping.
 
-Each stage's own output file carries the actual data quality signal (`status`/`reason` per record, see `docs/en/data-quality-log.md`), which is also what the next stage uses to decide whether to process a given record, not just the presence of a file. The reasoning behind this dispatch model, the alternatives considered (a real orchestrator, a filesystem watcher, per-item granularity), and the trade-offs of each are documented in ADR 004 and ADR 005 in `docs/en/ADR.md`.
+Each stage's own output file carries the actual data quality signal (`status`/`reason` per record, see `docs/en/data-quality-log.md`), which is also what the next stage uses to decide whether to process a given record, not just the presence of a file. The reasoning behind this dispatch model, the alternatives considered (a real orchestrator, a filesystem watcher, per-item granularity), and the trade-offs of each are documented in ADR 003 and ADR 004 in `docs/en/ADR.md`.
 
 ## Output Files
 
@@ -100,14 +100,14 @@ Neither file carries a `status`/`reason` field: a `null` value in a given field 
 
 Every non-trivial engineering decision made during this delivery, including the ones later reversed, is recorded in two living documents:
 
-- [`docs/en/ADR.md`](docs/en/ADR.md) ([PT](docs/pt/ADR.md)): architecture-level decisions (target area selection, LLM provider, dispatch mechanism and granularity for the Event-Driven pipeline, failure signaling).
+- [`docs/en/ADR.md`](docs/en/ADR.md) ([PT](docs/pt/ADR.md)): architecture-level decisions (target area selection, LLM provider, dispatch mechanism and granularity for the Event-Driven pipeline).
 - [`docs/en/data-quality-log.md`](docs/en/data-quality-log.md) ([PT](docs/pt/data-quality-log.md)): data quality issues found during development, their root cause, and the solution applied to each, including issues found by code review rather than by an observed failure.
 
 Some notable decisions worth highlighting here:
 
 - The scaffold's local Ollama LLM was replaced with the Gemini API, since the development machine did not meet the 16GB RAM the Ollama container requires (ADR 002).
-- Failure in any stage is signaled explicitly (`status`/`reason`, and an aggregated `translation_complete` where applicable) instead of being left as a silent `null`, and that signal is what downstream stages check before processing a record, not just the presence of an output file (ADR 003, DQ-001, DQ-006, DQ-008).
-- A fixed delay between LLM calls was added to stay under the Gemini free tier's rate limit, but it only removes one class of failure (429, quota); a transient provider-side failure (503) is not prevented, it is absorbed by the same isolate-and-reprocess model used for every other failure in the pipeline (DQ-001).
+- Failure in any stage is signaled explicitly (`status`/`reason`, and an aggregated `translation_complete` where applicable) instead of being left as a silent `null`, and that signal is what downstream stages check before processing a record, not just the presence of an output file (DQ-001, DQ-006, DQ-008).
+- A fixed delay between LLM calls was added to stay under the Gemini free tier's rate limit, but it only removes one class of failure (429, quota). A transient provider-side failure (503) is not prevented by that pause: it is deliberately left to be absorbed by the same isolate-and-reprocess model used for every other failure in the pipeline, a more realistic approach for an external dependency than trying to shield against every momentary instability from the provider (DQ-001).
 
 ## AI Assistance
 

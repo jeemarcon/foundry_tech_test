@@ -17,21 +17,26 @@ limit: 15, model: gemini-3.5-flash-lite, quotaId: GenerateRequestsPerMinutePerPr
 Please retry in 49.484914876s.
 ```
 
-Exemplo do nulo no arquivo intermediário (código `19322`, `description_translations.json`):
+Exemplo do nulo no arquivo intermediário (código `19322`, `description_translations.json`), antes de qualquer sinalização de status/reason existir:
 ```json
-"es": {"text": null, "status": "Failed", "reason": "LLM_error"},
-"fr": {"text": null, "status": "Failed", "reason": "LLM_error"}
+"es": null,
+"fr": null
 ```
 
 **Target areas afetadas:** Data Quality (dado incompleto sem sinalização) e Scalability (rate limiting/backpressure ausente).
 
-**Solução (Data Quality, rastreabilidade):** sinalização explícita de status/reason por registro em `03_describe.py`, e status/reason por idioma + `translation_complete` agregado em `05_translate_descriptions.py`, em vez de falha silenciosa. *(concluído)*
+**Solução (Data Quality, rastreabilidade):** sinalização explícita de status/reason por registro em `03_describe.py`, e status/reason por idioma + `translation_complete` agregado em `05_translate_descriptions.py`, em vez de falha silenciosa. Mesmo registro do exemplo anterior (código `19322`), agora no arquivo intermediário `description_translations.json`, já com o status/reason implementado:
+```json
+"es": {"text": null, "status": "Failed", "reason": "LLM_error"},
+"fr": {"text": null, "status": "Failed", "reason": "LLM_error"}
+```
+*(concluído)*
 
 **Solução (Data Quality, vazamento das colunas de rastreabilidade pro output final):** revisando o `localized_catalog.json` depois de pronto, notou-se que as próprias colunas de rastreabilidade criadas acima (`status`/`reason`) estavam se espelhando no output final, em vez de ficarem restritas ao arquivo intermediário. `07_localized_catalog.py` copiava `title`/`description` diretamente do JSON intermediário sem extrair o valor de texto de dentro do objeto de status/reason. PT (campo original, sem tradução) permanecia string simples, enquanto EN/ES/FR viravam objetos aninhados no output final, quebrando a consistência de tipo do schema:
 ```json
 "description": {
   "pt": "[...]",
-  "en": {"text": "[...]", "status": "Success", "reason": null},
+  "en": {"text": "[...]", "status": "Success"},
   "es": {"text": null, "status": "Failed", "reason": "LLM_error"},
   "fr": {"text": null, "status": "Failed", "reason": "LLM_error"}
 }
@@ -40,7 +45,7 @@ A lógica é a mesma do DQ-004: o valor ausente (`null`) é aceitável e correto
 
 **Solução (Scalability)** (`feature/scalability`): pausa entre chamadas ao LLM (`LLM_CALL_DELAY_SECONDS`, 4.5s) em `03_describe.py`/`04_translate.py`/`05_translate_descriptions.py`, para respeitar o limite de requisições por minuto. *(concluído)* Confirmado via reexecução de `make translate`: o código `18957`, que antes tinha `es` falhando com erro 503, passou a mostrar `es`/`fr` como `"status": "Success"`, e os 10 livros completaram sem nenhum erro de LLM.
 
-Vale uma precisão sobre a causa, para não confundir os dois problemas: a pausa elimina erro 429 (cota excedida, a causa raiz original documentada acima), mas não elimina erro 503 (indisponibilidade momentânea do próprio provedor), que é uma falha diferente, fora do controle do cliente. Isso foi confirmado numa reexecução posterior com 20 livros (teste de escala da target area Event-Driven): mesmo com a pausa ativa, uma chamada de descrição sofreu um erro 503 isolado. O pipeline isolou essa falha corretamente (o registro ficou `Failed`, e só a tradução de descrição daquele livro específico foi pulada), e uma nova execução completou o processamento sem nenhuma intervenção manual. Por isso a solução aqui não tenta prevenir 100% das falhas de LLM: ela remove a causa que estava sob controle (a cota) e conta com o modelo de isolamento e reprocessamento via status/reason (ver ADR 003) para absorver as falhas que não estão, uma postura mais realista para um serviço externo do que tentar blindar contra toda instabilidade momentânea do provedor.
+Vale uma precisão sobre a causa, para não confundir os dois problemas: a pausa elimina erro 429 (cota excedida, a causa raiz original documentada acima), mas não elimina erro 503 (indisponibilidade momentânea do próprio provedor), que é uma falha diferente, fora do controle do cliente. Isso foi confirmado numa reexecução posterior com 20 livros (teste de escala da target area Event-Driven): mesmo com a pausa ativa, uma chamada de descrição sofreu um erro 503 isolado. O pipeline isolou essa falha corretamente (o registro ficou `Failed`, e só a tradução de descrição daquele livro específico foi pulada), e uma nova execução completou o processamento sem nenhuma intervenção manual. Por isso a solução aqui não tenta prevenir 100% das falhas de LLM: ela remove a causa que estava sob controle (a cota) e conta com o modelo de isolamento e reprocessamento via status/reason para absorver as falhas que não estão, uma postura mais realista para um serviço externo do que tentar blindar contra toda instabilidade momentânea do provedor.
 
 ## DQ-002: Ranking de "mais acessados" é afetado pela própria raspagem (01_download.py)
 
@@ -56,7 +61,7 @@ Vale uma precisão sobre a causa, para não confundir os dois problemas: a pausa
 
 **Solução:** Pular a busca da página de detalhe (`get_download_url_and_metadata`) para códigos que já existem no `metadata.json` salvo de uma execução anterior, reaproveitando os dados já coletados em vez de visitar a página de novo. A listagem (`LIST_URL`) continua sendo buscada a cada execução, ela não afeta o contador de acessos, só a visita à página de detalhe o faz. Essa correção não tem efeito na primeira execução, mas evita o incremento indevido em qualquer execução subsequente: reruns manuais durante desenvolvimento, testes, retomada após falha parcial no meio do processamento.
 
-**Nota de escopo:** essa solução parte da premissa de que este pipeline roda como um instantâneo único, sem execução periódica agendada considerando o escopo do case ("process at least 10 books", sem menção a recorrência). Num cenário de execução periódica real, a resposta correta não seria voltar a sobrescrever o catálogo a cada execução (isso reintroduziria tanto o risco de órfãos quanto a poluição do contador de acessos do site), seria buscar a listagem numa cadência definida e mesclar os códigos novos com o catálogo existente, preservando os registros já conhecidos. (upsert muito provavelmente)
+**Nota de escopo:** essa solução parte da premissa de que este pipeline roda como um instantâneo único, sem execução periódica agendada, considerando o escopo do case ("process at least 10 books", sem menção a recorrência). Num cenário de execução periódica real, a resposta correta não seria voltar a sobrescrever o catálogo a cada execução (isso reintroduziria tanto o risco de registros órfãos quanto a poluição do contador de acessos do site), seria buscar a listagem numa cadência definida e mesclar os códigos novos com o catálogo existente, preservando os registros já conhecidos. Essa mesclagem não seria só uma opção mais segura: o próprio top 10 pode mudar entre uma execução e outra (um livro novo passa a estar entre os mais acessados, outro deixa de estar), então a listagem precisa continuar sendo buscada a cada execução para capturar essas mudanças, com a página de detalhe visitada só pra quem é de fato novo no ranking. (upsert muito provavelmente)
 
 ## DQ-003: Campo "size" com valor incorreto na origem (01_download.py)
 
@@ -81,7 +86,7 @@ Entrada em `catalog.json`:
 }
 ```
 
-Tamanho real do arquivo baixado, verificado via PowerShell:
+Tamanho real do arquivo baixado, verificado via terminal:
 ```
 Get-Item "data\pdfs\19322.pdf" | Select-Object Name, Length
 
@@ -92,9 +97,9 @@ Name       Length
 
 1.356.796 bytes (~1,3 MB), muito distante do "0.00 KB" reportado pelo site.
 
-**Causa raiz:** O campo `size` do `catalog.json` vem direto da coluna de tamanho da página de listagem do site (`parse_listing`, `cells[6]`), sem nenhuma validação. É um valor exibido pelo próprio domínio público, e está incorreto na origem pra esse registro específico, as não reflete o arquivo real.
+**Causa raiz:** O campo `size` do `catalog.json` vem direto da coluna de tamanho da página de listagem do site (`parse_listing`, `cells[6]`), sem nenhuma validação. É um valor exibido pelo próprio domínio público, e está incorreto na origem pra esse registro específico, mas não reflete o arquivo real.
 
-**Target areas afetadas:** Data Quality (dado presente e com formato válido, porém numericamente incorreto -> diferente de dado ausente). Também relevante porque `universal_metadata.json`, output final exigido pelo case, inclui "file size" como campo obrigatório: esse erro poderia vazar pro entregável final sem essa correção.
+**Target areas afetadas:** Data Quality (dado presente e com formato válido, porém numericamente incorreto -> diferente de dado ausente). Também relevante porque `universal_metadata.json`, output final exigido pelo case, inclui "file size" como campo obrigatório: esse erro poderia vazar pro entregável final.
 
 **Solução:** Não implementada, por decisão consciente. Investiguei o caminho até o output final (`universal_metadata.json`) e foi confirmado que o campo com defeito no `catalog.json` não é propagado, a etapa de montagem final recalcula `size_bytes` a partir do `hashes.json` (ou, na ausência, do tamanho real do arquivo em disco), evidenciado por `"size_bytes": 1356796` no output final, batendo exatamente com o tamanho real medido do arquivo. Como o raio de impacto está comprovadamente contido antes de chegar ao entregável exigido, optamos por documentar o achado sem investir tempo corrigindo o campo `size` do `catalog.json` diretamente. Priorização consciente diante do prazo do case, não uma omissão.
 
@@ -104,12 +109,11 @@ Name       Length
 
 **Sintoma:** 100% dos livros no `universal_metadata.json` têm `year: null`.
 
-**Causa raiz:** O `parse_detail_page` procura o rótulo "Ano da Tese" (Year of the Thesis) pra popular o campo `year`. Esse rótulo aparece no template da página de detalhe independente do tipo de obra, mas só é preenchido de fato pra teses acadêmicas. Verificado manualmente no site (código 15713 e outros): o rótulo aparece, mas o valor ao lado está em branco na própria origem: confirma que não é falha de extração, é ausência real de dado na fonte, pra esse tipo de acervo ("História").
+**Causa raiz:** O `parse_detail_page` procura o rótulo "Ano da Tese" (Year of the Thesis) pra popular o campo `year`. Esse rótulo aparece no template da página de detalhe independente do tipo de obra, mas parece que só é preenchido de fato pra teses acadêmicas. Verificado manualmente no site (código 15713 e outros): o rótulo aparece, mas o valor ao lado está em branco na própria origem: confirma que não é falha de extração, é ausência real de dado na fonte, pra esse tipo de acervo ("História").
 
 **Target areas afetadas:** Data Quality (avaliar se um dado ausente é defeito ou característica real da fonte, antes de tentar "corrigir").
 
-**Solução:** Mantido `null` no output final (`universal_metadata.json`), decisão respaldada por pesquisa de boas práticas (ver fontes), que desaconselha preencher ausência real com um placeholder artificial. Adicionado, porém, um sinal leve e escopado no `metadata.json` intermediário (produzido pelo `01_download.py`): quando `year` não é extraído, `parse_detail_page` registra `year_status` como `"empty_in_source"` (rótulo "Ano da Tese" encontrado, valor em branco na origem, o caso confirmado aqui) ou `"label_not_found"` (rótulo nem apareceu, sinal de possível problema de extração real). Esse sinal não é propagado ao output final, servindo só como diagnóstico interno pra
-evitar repetir a investigação manual no site caso o mesmo padrão apareça de novo.
+**Solução:** Mantido `null` no output final (`universal_metadata.json`), decisão respaldada por pesquisa de boas práticas (ver fontes), que desaconselha preencher ausência real com um placeholder artificial. Adicionado, porém, um sinal leve e escopado no `metadata.json` intermediário (produzido pelo `01_download.py`): quando `year` não é extraído, `parse_detail_page` registra `year_status` como `"empty_in_source"` (rótulo "Ano da Tese" encontrado, valor em branco na origem, o caso confirmado aqui) ou `"label_not_found"` (rótulo nem apareceu, sinal de possível problema de extração real). Esse sinal não é propagado ao output final, servindo só como diagnóstico interno pra evitar repetir a investigação manual no site caso o mesmo padrão apareça de novo.
 
 **Fontes:**
 - https://sqlpad.io/tutorial/fill-missing-values-sql-coalesce-window-functions/
@@ -123,11 +127,9 @@ evitar repetir a investigação manual no site caso o mesmo padrão apareça de 
 
 **Causa raiz:** o site tem proteção anti-bot, tratada em `fetch_page` (checagem de "challenge" no início do HTML), mas essa mesma proteção não tem equivalente em `download_pdf`. Se o endpoint de download responder com uma página de erro ou captcha em HTML, com status 200 e mais de 1000 bytes, esse conteúdo passa pelas duas validações existentes, é gravado como `{code}.pdf`, e o registro fica marcado como baixado com sucesso.
 
-**Nota sobre a natureza do achado:** diferente de DQ-001 a DQ-004, esse não é um problema observado numa execução real do pipeline. Foi encontrado por revisão do código (com apoio do Claude Code), procurando deliberadamente por lacunas de validação antes de fechar a target area Data Quality. Registrado aqui como achado preventivo, não como incidente.
+**Nota sobre a natureza do achado:** diferente de DQ-001 a DQ-004, esse não é um problema observado numa execução real do pipeline. Foi encontrado por revisão do código (com apoio do Claude Code), procurando deliberadamente por lacunas de validação. Registrado aqui como achado preventivo, não como incidente.
 
-**Target areas afetadas:** Data Quality (arquivo corrompido/inválido indistinguível de um arquivo saudável no restante do pipeline).
-
-**Propagação (se não corrigido):** alta. O arquivo inválido seria hasheado normalmente em `02_hash.py` (hash de um HTML, não do livro), poderia gerar erro silencioso ou descrição de baixa qualidade em `03_describe.py`/`06_covers.py` (o `fitz` pode falhar ao abrir ou renderizar lixo), e em `08_universal_metadata.py` teria `document_hash` e `size_bytes` preenchidos normalmente, parecendo um registro saudável no output final exigido pelo case.
+**Target areas afetadas:** Data Quality - arquivo corrompido/inválido indistinguível de um arquivo saudável no restante do pipeline. O arquivo inválido seria hasheado normalmente em `02_hash.py` (hash de um HTML, não do livro), poderia gerar erro silencioso ou descrição de baixa qualidade.
 
 **Solução:** `download_pdf` passou a checar a assinatura do arquivo (`resp.content[:5] == b"%PDF-"`, os primeiros bytes de qualquer PDF válido) antes de gravar. Se a assinatura não bater, o conteúdo é descartado (nada é escrito em disco) e a função retorna `False`, deixando `downloaded: False` no `catalog.json`. Nenhum campo novo de status/reason foi necessário aqui: o mecanismo de retry em `main()` já decide se baixa de novo checando `pdf_path.exists()`, então bastou fazer essa checagem receber uma informação verdadeira. Antes, ela recebia um falso positivo. *(concluído)*
 
@@ -139,9 +141,7 @@ evitar repetir a investigação manual no site caso o mesmo padrão apareça de 
 
 **Causa raiz:** o mesmo padrão já corrigido em `04_translate.py` e presente originalmente em `05_translate_descriptions.py` antes do DQ-001: usar presença de chave como sinônimo de sucesso, em vez de checar o resultado da tentativa anterior. Aqui é mais pobre ainda, porque a falha nem carrega `status`/`reason`, só um `None` sem contexto.
 
-**Target areas afetadas:** Data Quality (retry quebrado e ausência de rastreabilidade sobre por que uma capa não foi extraída).
-
-**Propagação:** alta e direta. `08_universal_metadata.py:48-49` faz `cover.get("path") if cover else None`, com `cover` igual a `None`, tanto `cover_path` quanto `cover_hash` viram `null` no `universal_metadata.json`, dois campos exigidos pelo case, indistinguíveis de "nunca foi tentado corretamente".
+**Target areas afetadas:** Data Quality - retry quebrado e ausência de rastreabilidade sobre por que uma capa não foi extraída.
 
 **Solução:** a condição de skip passou a checar `(covers.get(code) or {}).get("status") == "Success"`, em vez de só a presença da chave. Sucesso e falha agora gravam um objeto com `status` (`"Success"` ou `"Failed"`, com `reason: "extraction_error"` no segundo caso), no mesmo formato usado em `03_describe.py`/`04_translate.py`/`05_translate_descriptions.py`. Entradas antigas do formato anterior (sem `status`) são reprocessadas uma vez e migram sozinhas pro novo formato. `08_universal_metadata.py` não precisou de nenhuma mudança: o `cover` de uma falha continua sendo um dicionário truthy com `path`/`hash` em `None`, produzindo o mesmo `null` de antes no output final. *(concluído)*
 
@@ -155,11 +155,11 @@ evitar repetir a investigação manual no site caso o mesmo padrão apareça de 
 
 **Target areas afetadas:** Data Quality (validação de conteúdo, não só de forma, antes de propagar um dado como confiável).
 
-**Escopo consciente:** validar semanticamente se uma descrição está correta não é viável no prazo do case (isso seria, na prática, outro classificador). A solução aqui é uma heurística barata, não uma prova de qualidade: tamanho mínimo de 40 caracteres e uma lista curta de frases de recusa conhecidas em PT/EN. Reduz o risco, não elimina.
+**Escopo consciente:** validar semanticamente se uma descrição está correta não é viável no prazo do case (isso seria, na prática, outro classificador). A solução aqui é uma conidção simples, não uma prova de super qualidade: tamanho mínimo de 40 caracteres e uma lista curta de frases de recusa conhecidas em PT/EN. Reduz o risco, não elimina.
 
-**Decisão de design:** o achado da heurística vira um campo novo e separado, `quality_flag` (`"too_short"` ou `"possible_refusal"`), em vez de rebaixar `status` para `"Failed"`. `status` continua significando "a chamada ao LLM funcionou tecnicamente", `quality_flag` sinaliza "o conteúdo pode não ser confiável", sem misturar os dois conceitos. Consequência: uma descrição flagada ainda é traduzida em `05` e ainda aparece no `localized_catalog.json` normalmente, o sinal fica só em `descriptions.json`, para revisão manual (viável com 10 livros).
+**Decisão de design:** o achado da condiçao vira um campo novo e separado, `quality_flag` (`"too_short"` ou `"possible_refusal"`), em vez de rebaixar `status` para `"Failed"`. `status` continua significando "a chamada ao LLM funcionou tecnicamente", `quality_flag` sinaliza "o conteúdo pode não ser confiável", sem misturar os dois conceitos. Consequência: uma descrição com flag ainda é traduzida em `05` e ainda aparece no `localized_catalog.json` normalmente, o sinal fica só em `descriptions.json`, para revisão manual (viável no cenário de 10 livros).
 
-**Solução:** adicionada a função `looks_suspicious()`, aplicada a toda descrição gerada com sucesso. Quando aciona, grava `quality_flag` junto do registro. Nenhuma das 10 descrições reais aciona a heurística hoje. *(concluído)*
+**Solução:** adicionada a função `looks_suspicious()`, aplicada a toda descrição gerada com sucesso. Quando aciona, grava `quality_flag` junto do registro. Nenhuma das 10 descrições reais acionou a flag. *(concluído)*
 
 **Achado relacionado, mesmo arquivo:** a checagem de resume em `03_describe.py` (`if code in descriptions: continue`) tinha o mesmo defeito do DQ-006/DQ-001 antes da correção: não checava `status`, então uma descrição `"Failed"` (`render_failed` ou `llm_error`) ficava congelada para sempre. Corrigido para `descriptions.get(code, {}).get("status") == "Success"`, no mesmo padrão já usado em `04`/`05`/`06`. Corrigido também um efeito colateral encontrado ao ler o código: quando `render_failed` ocorria, um `continue` pulava o salvamento em disco daquela iteração, se fosse o último PDF do loop, a falha nunca era persistida. As duas correções foram unificadas num único ponto de salvamento por iteração.
 
@@ -171,13 +171,11 @@ evitar repetir a investigação manual no site caso o mesmo padrão apareça de 
 
 **Causa raiz:** `02_hash.py`, `03_describe.py` e `06_covers.py` descobrem indiretamente que um download falhou, porque procuram por arquivo físico em `PDF_DIR` (nenhum PDF em disco para aquele código, então nunca processam o registro). Mas `04_translate.py` traduz o título direto do `catalog.json`, sem depender de arquivo em disco, então processaria normalmente um livro que nunca baixou (o título em si não corre risco de vir malformado: `parse_listing` só adiciona uma entrada ao catálogo quando `code` e `title` já vêm preenchidos na raspagem da listagem, então esse campo específico nunca é o problema). E `07_localized_catalog.py`/`08_universal_metadata.py` também iteram sobre `catalog` sem checar `downloaded`, montando um registro completo no output final para um livro sem conteúdo algum.
 
-**Target areas afetadas:** Data Quality (sinal existente e não utilizado, registro incompleto no pipeline sem rastreabilidade).
+**Target areas afetadas:** Data Quality - sinal existente e não utilizado, registro incompleto no pipeline sem rastreabilidade. um livro que falhou o download apareceria em `localized_catalog.json` e `universal_metadata.json` com a maioria dos campos nulos (hash, capa, descrição) e ainda assim com o título traduzido, indistinguível de qualquer outra causa de nulo (erro de LLM, capa corrompida), sem nenhuma pista de que o problema começou na etapa de download.
 
-**Propagação (se não corrigido):** um livro que falhou o download apareceria em `localized_catalog.json` e `universal_metadata.json` com a maioria dos campos nulos (hash, capa, descrição) e ainda assim com o título traduzido, indistinguível de qualquer outra causa de nulo (erro de LLM, capa corrompida), sem nenhuma pista de que o problema começou na etapa de download.
+**Solução:** `download_pdf()` em `01_download.py` passou a retornar `(bool, reason)` em vez de só `bool`, distinguindo `"http_error"`, `"response_too_small"`, `"html_response"`, `"invalid_pdf_signature"` e `"request_exception"`. O campo `downloaded` foi substituído por `status`/`reason` em cada entrada de `catalog.json`, no mesmo padrão já usado em `03`/`04`/`05`/`06` (incluindo o caso `"no_download_url"`, quando a página de detalhe não tem link de download). `04_translate.py` passou a checar `entry.get("status") == "Success"` antes de traduzir o título. Quando falha, grava `status: "Skipped"`, `reason: "upstream_download_failed"`, no mesmo padrão já usado em `05_translate_descriptions.py` para descrição. *(concluído)*
 
-**Solução:** `download_pdf()` em `01_download.py` passou a retornar `(bool, reason)` em vez de só `bool`, distinguindo `"http_error"`, `"response_too_small"`, `"html_response"`, `"invalid_pdf_signature"` e `"request_exception"`. O campo `downloaded` foi substituído por `status`/`reason` em cada entrada de `catalog.json`, no mesmo padrão já usado em `03`/`04`/`05`/`06` (incluindo o caso `"no_download_url"`, quando a página de detalhe não tem link de download). `04_translate.py` passou a checar `entry.get("status") == "Success"` antes de traduzir o título; quando falha, grava `status: "Skipped"`, `reason: "upstream_download_failed"`, no mesmo padrão já usado em `05_translate_descriptions.py` para descrição. *(concluído)*
-
-**Decisão de design (não propagar status/reason para os arquivos finais):** avaliou-se adicionar `status`/`reason` também em `localized_catalog.json`/`universal_metadata.json`, mas essa ideia foi descartada. Um status único por registro nesses dois arquivos precisaria agregar o resultado de download, hash, describe, translate (título e descrição, em 3 idiomas) e covers ao mesmo tempo pra ser honesto, e mesmo assim erraria em casos legítimos: `year` nulo é esperado e correto (DQ-004), então um agregado teria que tratar esse campo como exceção; e um livro que baixou normalmente mas teve uma tradução de descrição falhando ainda apareceria como sucesso se o status olhasse só para download. Nos dois sentidos, um campo único mentiria por omissão. A prática recomendada em qualidade de dados é medir cada dimensão (completude, validade) separadamente, não colapsar num único status por registro; o próprio projeto já segue esse princípio com `year_status`, `quality_flag` e `translation_complete`, todos escopados à dimensão que descrevem. Os nulos no output final, combinados com qual campo especificamente está nulo, já formam uma assinatura diagnosticável: um livro que nunca baixou mostra `title.pt` preenchido (vem da raspagem da listagem, não do PDF) mas todo o resto nulo; um livro com só uma tradução de descrição falhando mostra só aquele idioma nulo. A rastreabilidade completa (o porquê) permanece nos arquivos intermediários (`catalog.json`, `translations.json`), como em todos os outros achados deste log.
+**Decisão de design (não propagar status/reason para os arquivos finais):** avaliou-se adicionar `status`/`reason` também em `localized_catalog.json`/`universal_metadata.json`, mas essa ideia foi descartada. Um status único por registro nesses dois arquivos precisaria agregar o resultado de download, hash, describe, translate (título e descrição, em 3 idiomas) e covers ao mesmo tempo pra ser honesto, e mesmo assim erraria em casos legítimos: `year` nulo é esperado (DQ-004), então um agregado teria que tratar esse campo como exceção e um livro que baixou normalmente mas teve uma tradução de descrição falhando ainda apareceria como sucesso se o status olhasse só para download. Nos dois sentidos, um campo único mentiria por omissão. A prática recomendada em qualidade de dados é medir cada dimensão (completude, validade) separadamente, não colapsar num único status por registro, o próprio projeto já segue esse princípio com `year_status`, `quality_flag` e `translation_complete`, todos escopados à dimensão que descrevem. Os nulos no output final, combinados com qual campo especificamente está nulo, já formam uma assinatura diagnosticável: um livro que nunca baixou mostra `title.pt` preenchido (vem da raspagem da listagem, não do PDF) mas todo o resto nulo. Um livro com só uma tradução de descrição falhando mostra só aquele idioma nulo. A rastreabilidade completa (o porquê) permanece nos arquivos intermediários (`catalog.json`, `translations.json`), como nos outros achados deste log.
 
 **Fontes:**
 - https://www.getdbt.com/blog/data-quality-dimensions
