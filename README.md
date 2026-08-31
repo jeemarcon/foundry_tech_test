@@ -2,14 +2,14 @@
 
 Pipeline that scrapes book metadata and PDFs from the [Domínio Público](https://dominiopublico.mec.gov.br/) catalog, extracts and translates descriptions with a vision LLM, and assembles two localized/normalized output datasets.
 
-## Pillars
+## Target Areas
 
 This delivery focuses on two of the five target areas defined by the case:
 
 - **Data Quality**: traceability (status/reason per record, per stage), validation before propagating data downstream, and explicit decisions on how to handle missing or malformed source data. See [`docs/en/data-quality-log.md`](docs/en/data-quality-log.md).
 - **Event-Driven Pipeline**: stages dispatch based on the real dependency graph between them instead of a fixed sequential order, allowing independent stages to run in parallel and isolating failures to only the stages that actually depend on them.
 
-The rationale for this choice, and the pillars considered and set aside, is in [`docs/en/ADR.md`](docs/en/ADR.md) (ADR 001). Both documents are also available in Portuguese, the language they were originally written in, under [`docs/pt/`](docs/pt/).
+The rationale for this choice, and the target areas considered and set aside, is in [`docs/en/ADR.md`](docs/en/ADR.md) (ADR 001). Both documents are also available in Portuguese, the language they were originally written in, under [`docs/pt/`](docs/pt/).
 
 ## Requirements
 
@@ -94,13 +94,13 @@ Each stage's own output file carries the actual data quality signal (`status`/`r
 
 `data/output/universal_metadata.json`: one entry per book, with `id`, `document_hash`, `cover_path`, `accesses`, `size_bytes`, `category`, and `year`.
 
-Neither file carries a `status`/`reason` field: a `null` value in a given field is a legitimate outcome in some cases (for example, `year` is genuinely absent at the source for most books in this catalog, see DQ-004) and a real failure signal in others, and collapsing both into a single per-record status would misrepresent one or the other. That traceability is kept in the intermediate files instead (`catalog.json`, `descriptions.json`, `translations.json`, `description_translations.json`, `covers.json`), each scoped to the dimension it describes. The full reasoning is in DQ-008 in `docs/data-quality-log.md`.
+Neither file carries a `status`/`reason` field: a `null` value in a given field is a legitimate outcome in some cases (for example, `year` is genuinely absent at the source for most books in this catalog, see DQ-004) and a real failure signal in others, and collapsing both into a single per-record status would misrepresent one or the other. That traceability is kept in the intermediate files instead (`catalog.json`, `descriptions.json`, `translations.json`, `description_translations.json`, `covers.json`), each scoped to the dimension it describes. The full reasoning is in DQ-008 in `docs/en/data-quality-log.md`.
 
 ## Design Decisions and Trade-offs
 
 Every non-trivial engineering decision made during this delivery, including the ones later reversed, is recorded in two living documents:
 
-- [`docs/en/ADR.md`](docs/en/ADR.md) ([PT](docs/pt/ADR.md)): architecture-level decisions (pillar selection, LLM provider, dispatch mechanism and granularity for the Event-Driven pipeline, failure signaling).
+- [`docs/en/ADR.md`](docs/en/ADR.md) ([PT](docs/pt/ADR.md)): architecture-level decisions (target area selection, LLM provider, dispatch mechanism and granularity for the Event-Driven pipeline, failure signaling).
 - [`docs/en/data-quality-log.md`](docs/en/data-quality-log.md) ([PT](docs/pt/data-quality-log.md)): data quality issues found during development, their root cause, and the solution applied to each, including issues found by code review rather than by an observed failure.
 
 Some notable decisions worth highlighting here:
@@ -108,3 +108,7 @@ Some notable decisions worth highlighting here:
 - The scaffold's local Ollama LLM was replaced with the Gemini API, since the development machine did not meet the 16GB RAM the Ollama container requires (ADR 002).
 - Failure in any stage is signaled explicitly (`status`/`reason`, and an aggregated `translation_complete` where applicable) instead of being left as a silent `null`, and that signal is what downstream stages check before processing a record, not just the presence of an output file (ADR 003, DQ-001, DQ-006, DQ-008).
 - A fixed delay between LLM calls was added to stay under the Gemini free tier's rate limit, but it only removes one class of failure (429, quota); a transient provider-side failure (503) is not prevented, it is absorbed by the same isolate-and-reprocess model used for every other failure in the pipeline (DQ-001).
+
+## AI Assistance
+
+An AI assistant (Claude) was used throughout this project's development, as a pair-programming and documentation partner: discussing trade-offs, reviewing code, drafting and translating documentation, and helping troubleshoot the local environment setup. Every engineering and documentation decision in this project, and the reasoning recorded for it in `docs/`, passed through the author and reflects the author's own judgment.

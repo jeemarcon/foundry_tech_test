@@ -23,7 +23,7 @@ Example of the null in the intermediate file (code `19322`, `description_transla
 "fr": {"text": null, "status": "Failed", "reason": "LLM_error"}
 ```
 
-**Pillars affected:** Data Quality (incomplete data with no signal) and Scalability (missing rate limiting/backpressure).
+**Target areas affected:** Data Quality (incomplete data with no signal) and Scalability (missing rate limiting/backpressure).
 
 **Solution (Data Quality, traceability):** explicit status/reason signaling per record in `03_describe.py`, and per-language status/reason plus an aggregated `translation_complete` in `05_translate_descriptions.py`, instead of silent failure. *(done)*
 
@@ -40,7 +40,7 @@ The logic is the same as DQ-004: the missing value (`null`) is acceptable and co
 
 **Solution (Scalability)** (`feature/scalability`): pause between LLM calls (`LLM_CALL_DELAY_SECONDS`, 4.5s) in `03_describe.py`/`04_translate.py`/`05_translate_descriptions.py`, to respect the requests-per-minute limit. *(done)* Confirmed via re-running `make translate`: code `18957`, which previously had `es` failing with a 503 error, now shows `es`/`fr` as `"status": "Success"`, and all 10 books completed with no LLM errors.
 
-Worth a precision on the cause, to avoid conflating the two problems: the pause eliminates error 429 (quota exceeded, the original root cause documented above), but does not eliminate error 503 (the provider's own momentary unavailability), which is a different failure, outside the client's control. This was confirmed in a later re-run with 20 books (a scale test for the Event-Driven pillar): even with the pause active, one description call suffered an isolated 503 error. The pipeline correctly isolated that failure (the record was marked `Failed`, and only that specific book's description translation was skipped), and a new run completed processing with no manual intervention. That is why the solution here does not try to prevent 100% of LLM failures: it removes the cause that was under control (the quota) and relies on the isolate-and-reprocess model via status/reason (see ADR 003) to absorb the failures that are not, a more realistic posture for an external service than trying to shield against every momentary instability from the provider.
+Worth a precision on the cause, to avoid conflating the two problems: the pause eliminates error 429 (quota exceeded, the original root cause documented above), but does not eliminate error 503 (the provider's own momentary unavailability), which is a different failure, outside the client's control. This was confirmed in a later re-run with 20 books (a scale test for the Event-Driven target area): even with the pause active, one description call suffered an isolated 503 error. The pipeline correctly isolated that failure (the record was marked `Failed`, and only that specific book's description translation was skipped), and a new run completed processing with no manual intervention. That is why the solution here does not try to prevent 100% of LLM failures: it removes the cause that was under control (the quota) and relies on the isolate-and-reprocess model via status/reason (see ADR 003) to absorb the failures that are not, a more realistic posture for an external service than trying to shield against every momentary instability from the provider.
 
 ## DQ-002: The "most accessed" ranking is affected by the scraping itself (01_download.py)
 
@@ -52,7 +52,7 @@ Worth a precision on the cause, to avoid conflating the two problems: the pause 
 
 **Observed evidence:** Two consecutive runs of `make download` returned the same 10 codes, in the same order, but with `accesses` incremented by +1 for each of the ten books on the second run.
 
-**Pillars affected:** Data Quality (reproducibility of the scraped dataset is not guaranteed over time, even with no explicit randomness in the code).
+**Target areas affected:** Data Quality (reproducibility of the scraped dataset is not guaranteed over time, even with no explicit randomness in the code).
 
 **Solution:** Skip fetching the detail page (`get_download_url_and_metadata`) for codes that already exist in the `metadata.json` saved from a previous run, reusing the data already collected instead of visiting the page again. The listing (`LIST_URL`) is still fetched on every run, it does not affect the access counter, only visiting the detail page does. This fix has no effect on the first run, but prevents the undue increment on any subsequent run: manual reruns during development, tests, resuming after a partial failure mid-processing.
 
@@ -94,7 +94,7 @@ Name       Length
 
 **Root cause:** The `size` field in `catalog.json` comes directly from the size column on the site's listing page (`parse_listing`, `cells[6]`), with no validation. It is a value displayed by Domínio Público itself, and is incorrect at the source for this specific record, it does not reflect the actual file.
 
-**Pillars affected:** Data Quality (data present and validly formatted, but numerically incorrect, different from missing data). Also relevant because `universal_metadata.json`, the final output required by the case, includes "file size" as a required field: this error could leak into the final deliverable without this fix.
+**Target areas affected:** Data Quality (data present and validly formatted, but numerically incorrect, different from missing data). Also relevant because `universal_metadata.json`, the final output required by the case, includes "file size" as a required field: this error could leak into the final deliverable without this fix.
 
 **Solution:** Not implemented, by a conscious decision. I traced the path to the final output (`universal_metadata.json`) and confirmed that the flawed field in `catalog.json` is not propagated: the final assembly stage recomputes `size_bytes` from `hashes.json` (or, in its absence, from the actual file size on disk), evidenced by `"size_bytes": 1356796` in the final output, matching exactly the actual measured file size. Since the blast radius is proven to be contained before reaching the required deliverable, I chose to document the finding without spending time fixing the `size` field in `catalog.json` directly. A conscious prioritization given the case's deadline, not an oversight.
 
@@ -106,7 +106,7 @@ Name       Length
 
 **Root cause:** `parse_detail_page` looks for the "Ano da Tese" ("Year of the Thesis") label to populate the `year` field. That label appears in the detail page's template regardless of the work's type, but is only actually filled in for academic theses. Manually verified on the site (code 15713 and others): the label appears, but the value next to it is blank at the source itself, confirming this is not an extraction failure, it is a real absence of data at the source, for this type of collection ("History").
 
-**Pillars affected:** Data Quality (evaluating whether missing data is a defect or a real characteristic of the source, before trying to "fix" it).
+**Target areas affected:** Data Quality (evaluating whether missing data is a defect or a real characteristic of the source, before trying to "fix" it).
 
 **Solution:** Kept as `null` in the final output (`universal_metadata.json`), a decision backed by best-practices research (see sources), which advises against filling a genuine absence with an artificial placeholder. However, a lightweight, scoped signal was added to the intermediate `metadata.json` (produced by `01_download.py`): when `year` is not extracted, `parse_detail_page` records `year_status` as `"empty_in_source"` (the "Ano da Tese" label was found, value blank at the source, the case confirmed here) or `"label_not_found"` (the label did not even appear, a sign of a possible real extraction problem). This signal is not propagated to the final output, serving only as internal diagnostics to avoid repeating the manual site investigation should the same pattern appear again.
 
@@ -122,9 +122,9 @@ Name       Length
 
 **Root cause:** the site has anti-bot protection, handled in `fetch_page` (checking for a "challenge" at the start of the HTML), but that same protection has no equivalent in `download_pdf`. If the download endpoint responds with an error page or captcha in HTML, with status 200 and more than 1000 bytes, that content passes both existing checks, gets written as `{code}.pdf`, and the record is marked as successfully downloaded.
 
-**Note on the nature of the finding:** unlike DQ-001 through DQ-004, this is not a problem observed in an actual pipeline run. It was found through code review (with Claude Code's support), deliberately looking for validation gaps before closing out the Data Quality pillar. Recorded here as a preventive finding, not an incident.
+**Note on the nature of the finding:** unlike DQ-001 through DQ-004, this is not a problem observed in an actual pipeline run. It was found through code review (with Claude Code's support), deliberately looking for validation gaps before closing out the Data Quality target area. Recorded here as a preventive finding, not an incident.
 
-**Pillars affected:** Data Quality (a corrupted/invalid file indistinguishable from a healthy one in the rest of the pipeline).
+**Target areas affected:** Data Quality (a corrupted/invalid file indistinguishable from a healthy one in the rest of the pipeline).
 
 **Propagation (if not fixed):** high. The invalid file would be hashed normally in `02_hash.py` (hashing an HTML, not the book), could produce a silent error or a low-quality description in `03_describe.py`/`06_covers.py` (`fitz` could fail to open or render garbage), and in `08_universal_metadata.py` it would have `document_hash` and `size_bytes` filled in normally, looking like a healthy record in the final output required by the case.
 
@@ -138,7 +138,7 @@ Name       Length
 
 **Root cause:** the same pattern already fixed in `04_translate.py`, and originally present in `05_translate_descriptions.py` before DQ-001: using key presence as a synonym for success, instead of checking the result of the previous attempt. Here it is even poorer, since the failure does not even carry `status`/`reason`, just a context-free `None`.
 
-**Pillars affected:** Data Quality (broken retry and lack of traceability on why a cover was not extracted).
+**Target areas affected:** Data Quality (broken retry and lack of traceability on why a cover was not extracted).
 
 **Propagation:** high and direct. `08_universal_metadata.py:48-49` does `cover.get("path") if cover else None`, with `cover` equal to `None`, both `cover_path` and `cover_hash` become `null` in `universal_metadata.json`, two fields required by the case, indistinguishable from "never properly attempted".
 
@@ -152,7 +152,7 @@ Name       Length
 
 **Root cause:** the existing validation is about form (the call returned something), not content. Since `05_translate_descriptions.py` only looks at the previous stage's `status == "Success"`, a bad description would be translated into EN/ES/FR normally, multiplying the low-quality data across 4 languages in `localized_catalog.json`, all marked as successful from start to finish.
 
-**Pillars affected:** Data Quality (validating content, not just form, before propagating a piece of data as trustworthy).
+**Target areas affected:** Data Quality (validating content, not just form, before propagating a piece of data as trustworthy).
 
 **Conscious scope:** semantically validating whether a description is correct is not feasible within the case's deadline (that would, in practice, be a whole other classifier). The solution here is a cheap heuristic, not proof of quality: a minimum length of 40 characters and a short list of known refusal phrases in PT/EN. It reduces the risk, it does not eliminate it.
 
@@ -170,7 +170,7 @@ Name       Length
 
 **Root cause:** `02_hash.py`, `03_describe.py`, and `06_covers.py` discover a failed download indirectly, because they look for the physical file in `PDF_DIR` (no PDF on disk for that code, so they never process the record). But `04_translate.py` translates the title directly from `catalog.json`, with no dependency on a file on disk, so it would process a book that never downloaded as if nothing were wrong (the title itself is not at risk of coming malformed: `parse_listing` only adds an entry to the catalog when `code` and `title` are already filled in from the listing scrape, so that specific field is never the problem). And `07_localized_catalog.py`/`08_universal_metadata.py` also iterate over `catalog` without checking `downloaded`, assembling a complete record in the final output for a book with no content at all.
 
-**Pillars affected:** Data Quality (an existing signal that goes unused, an incomplete record in the pipeline with no traceability).
+**Target areas affected:** Data Quality (an existing signal that goes unused, an incomplete record in the pipeline with no traceability).
 
 **Propagation (if not fixed):** a book that failed to download would appear in `localized_catalog.json` and `universal_metadata.json` with most fields null (hash, cover, description) and yet with a translated title, indistinguishable from any other cause of null (an LLM error, a corrupted cover), with no clue that the problem started at the download stage.
 

@@ -23,7 +23,7 @@ Exemplo do nulo no arquivo intermediário (código `19322`, `description_transla
 "fr": {"text": null, "status": "Failed", "reason": "LLM_error"}
 ```
 
-**Pilares afetados:** Data Quality (dado incompleto sem sinalização) e Scalability (rate limiting/backpressure ausente).
+**Target areas afetadas:** Data Quality (dado incompleto sem sinalização) e Scalability (rate limiting/backpressure ausente).
 
 **Solução (Data Quality, rastreabilidade):** sinalização explícita de status/reason por registro em `03_describe.py`, e status/reason por idioma + `translation_complete` agregado em `05_translate_descriptions.py`, em vez de falha silenciosa. *(concluído)*
 
@@ -40,7 +40,7 @@ A lógica é a mesma do DQ-004: o valor ausente (`null`) é aceitável e correto
 
 **Solução (Scalability)** (`feature/scalability`): pausa entre chamadas ao LLM (`LLM_CALL_DELAY_SECONDS`, 4.5s) em `03_describe.py`/`04_translate.py`/`05_translate_descriptions.py`, para respeitar o limite de requisições por minuto. *(concluído)* Confirmado via reexecução de `make translate`: o código `18957`, que antes tinha `es` falhando com erro 503, passou a mostrar `es`/`fr` como `"status": "Success"`, e os 10 livros completaram sem nenhum erro de LLM.
 
-Vale uma precisão sobre a causa, para não confundir os dois problemas: a pausa elimina erro 429 (cota excedida, a causa raiz original documentada acima), mas não elimina erro 503 (indisponibilidade momentânea do próprio provedor), que é uma falha diferente, fora do controle do cliente. Isso foi confirmado numa reexecução posterior com 20 livros (teste de escala do pilar Event-Driven): mesmo com a pausa ativa, uma chamada de descrição sofreu um erro 503 isolado. O pipeline isolou essa falha corretamente (o registro ficou `Failed`, e só a tradução de descrição daquele livro específico foi pulada), e uma nova execução completou o processamento sem nenhuma intervenção manual. Por isso a solução aqui não tenta prevenir 100% das falhas de LLM: ela remove a causa que estava sob controle (a cota) e conta com o modelo de isolamento e reprocessamento via status/reason (ver ADR 003) para absorver as falhas que não estão, uma postura mais realista para um serviço externo do que tentar blindar contra toda instabilidade momentânea do provedor.
+Vale uma precisão sobre a causa, para não confundir os dois problemas: a pausa elimina erro 429 (cota excedida, a causa raiz original documentada acima), mas não elimina erro 503 (indisponibilidade momentânea do próprio provedor), que é uma falha diferente, fora do controle do cliente. Isso foi confirmado numa reexecução posterior com 20 livros (teste de escala da target area Event-Driven): mesmo com a pausa ativa, uma chamada de descrição sofreu um erro 503 isolado. O pipeline isolou essa falha corretamente (o registro ficou `Failed`, e só a tradução de descrição daquele livro específico foi pulada), e uma nova execução completou o processamento sem nenhuma intervenção manual. Por isso a solução aqui não tenta prevenir 100% das falhas de LLM: ela remove a causa que estava sob controle (a cota) e conta com o modelo de isolamento e reprocessamento via status/reason (ver ADR 003) para absorver as falhas que não estão, uma postura mais realista para um serviço externo do que tentar blindar contra toda instabilidade momentânea do provedor.
 
 ## DQ-002: Ranking de "mais acessados" é afetado pela própria raspagem (01_download.py)
 
@@ -52,7 +52,7 @@ Vale uma precisão sobre a causa, para não confundir os dois problemas: a pausa
 
 **Evidência observada:** Duas execuções seguidas de `make download` retornaram os mesmos 10 códigos, na mesma ordem, mas com `accesses` incrementado em +1 para cada um dos dez livros na segunda execução.
 
-**Pilares afetados:** Data Quality (reprodutibilidade do conjunto de dados raspado não é garantida ao longo do tempo, mesmo sem nenhuma aleatoriedade explícita no código).
+**Target areas afetadas:** Data Quality (reprodutibilidade do conjunto de dados raspado não é garantida ao longo do tempo, mesmo sem nenhuma aleatoriedade explícita no código).
 
 **Solução:** Pular a busca da página de detalhe (`get_download_url_and_metadata`) para códigos que já existem no `metadata.json` salvo de uma execução anterior, reaproveitando os dados já coletados em vez de visitar a página de novo. A listagem (`LIST_URL`) continua sendo buscada a cada execução, ela não afeta o contador de acessos, só a visita à página de detalhe o faz. Essa correção não tem efeito na primeira execução, mas evita o incremento indevido em qualquer execução subsequente: reruns manuais durante desenvolvimento, testes, retomada após falha parcial no meio do processamento.
 
@@ -94,7 +94,7 @@ Name       Length
 
 **Causa raiz:** O campo `size` do `catalog.json` vem direto da coluna de tamanho da página de listagem do site (`parse_listing`, `cells[6]`), sem nenhuma validação. É um valor exibido pelo próprio domínio público, e está incorreto na origem pra esse registro específico, as não reflete o arquivo real.
 
-**Pilares afetados:** Data Quality (dado presente e com formato válido, porém numericamente incorreto -> diferente de dado ausente). Também relevante porque `universal_metadata.json`, output final exigido pelo case, inclui "file size" como campo obrigatório: esse erro poderia vazar pro entregável final sem essa correção.
+**Target areas afetadas:** Data Quality (dado presente e com formato válido, porém numericamente incorreto -> diferente de dado ausente). Também relevante porque `universal_metadata.json`, output final exigido pelo case, inclui "file size" como campo obrigatório: esse erro poderia vazar pro entregável final sem essa correção.
 
 **Solução:** Não implementada, por decisão consciente. Investiguei o caminho até o output final (`universal_metadata.json`) e foi confirmado que o campo com defeito no `catalog.json` não é propagado, a etapa de montagem final recalcula `size_bytes` a partir do `hashes.json` (ou, na ausência, do tamanho real do arquivo em disco), evidenciado por `"size_bytes": 1356796` no output final, batendo exatamente com o tamanho real medido do arquivo. Como o raio de impacto está comprovadamente contido antes de chegar ao entregável exigido, optamos por documentar o achado sem investir tempo corrigindo o campo `size` do `catalog.json` diretamente. Priorização consciente diante do prazo do case, não uma omissão.
 
@@ -106,7 +106,7 @@ Name       Length
 
 **Causa raiz:** O `parse_detail_page` procura o rótulo "Ano da Tese" (Year of the Thesis) pra popular o campo `year`. Esse rótulo aparece no template da página de detalhe independente do tipo de obra, mas só é preenchido de fato pra teses acadêmicas. Verificado manualmente no site (código 15713 e outros): o rótulo aparece, mas o valor ao lado está em branco na própria origem: confirma que não é falha de extração, é ausência real de dado na fonte, pra esse tipo de acervo ("História").
 
-**Pilares afetados:** Data Quality (avaliar se um dado ausente é defeito ou característica real da fonte, antes de tentar "corrigir").
+**Target areas afetadas:** Data Quality (avaliar se um dado ausente é defeito ou característica real da fonte, antes de tentar "corrigir").
 
 **Solução:** Mantido `null` no output final (`universal_metadata.json`), decisão respaldada por pesquisa de boas práticas (ver fontes), que desaconselha preencher ausência real com um placeholder artificial. Adicionado, porém, um sinal leve e escopado no `metadata.json` intermediário (produzido pelo `01_download.py`): quando `year` não é extraído, `parse_detail_page` registra `year_status` como `"empty_in_source"` (rótulo "Ano da Tese" encontrado, valor em branco na origem, o caso confirmado aqui) ou `"label_not_found"` (rótulo nem apareceu, sinal de possível problema de extração real). Esse sinal não é propagado ao output final, servindo só como diagnóstico interno pra
 evitar repetir a investigação manual no site caso o mesmo padrão apareça de novo.
@@ -123,9 +123,9 @@ evitar repetir a investigação manual no site caso o mesmo padrão apareça de 
 
 **Causa raiz:** o site tem proteção anti-bot, tratada em `fetch_page` (checagem de "challenge" no início do HTML), mas essa mesma proteção não tem equivalente em `download_pdf`. Se o endpoint de download responder com uma página de erro ou captcha em HTML, com status 200 e mais de 1000 bytes, esse conteúdo passa pelas duas validações existentes, é gravado como `{code}.pdf`, e o registro fica marcado como baixado com sucesso.
 
-**Nota sobre a natureza do achado:** diferente de DQ-001 a DQ-004, esse não é um problema observado numa execução real do pipeline. Foi encontrado por revisão do código (com apoio do Claude Code), procurando deliberadamente por lacunas de validação antes de fechar o pilar de Data Quality. Registrado aqui como achado preventivo, não como incidente.
+**Nota sobre a natureza do achado:** diferente de DQ-001 a DQ-004, esse não é um problema observado numa execução real do pipeline. Foi encontrado por revisão do código (com apoio do Claude Code), procurando deliberadamente por lacunas de validação antes de fechar a target area Data Quality. Registrado aqui como achado preventivo, não como incidente.
 
-**Pilares afetados:** Data Quality (arquivo corrompido/inválido indistinguível de um arquivo saudável no restante do pipeline).
+**Target areas afetadas:** Data Quality (arquivo corrompido/inválido indistinguível de um arquivo saudável no restante do pipeline).
 
 **Propagação (se não corrigido):** alta. O arquivo inválido seria hasheado normalmente em `02_hash.py` (hash de um HTML, não do livro), poderia gerar erro silencioso ou descrição de baixa qualidade em `03_describe.py`/`06_covers.py` (o `fitz` pode falhar ao abrir ou renderizar lixo), e em `08_universal_metadata.py` teria `document_hash` e `size_bytes` preenchidos normalmente, parecendo um registro saudável no output final exigido pelo case.
 
@@ -133,13 +133,13 @@ evitar repetir a investigação manual no site caso o mesmo padrão apareça de 
 
 ## DQ-006: Cache de capa trata falha como definitiva, sem status/reason (06_covers.py)
 
-**Identificado em:** revisão de código, na mesma varredura sistemática do DQ-005 (achado preventivo, não incidente observado: conferido em `covers.json` real, os 10 livros extraíram capa com sucesso).
+**Identificado em:** revisão de código, na mesma varredura sistemática do DQ-005 (achado preventivo com auxilio do Claude Code, não incidente observado: conferido em `covers.json` real, os 10 livros extraíram capa com sucesso).
 
 **Sintoma:** `06_covers.py` usa `if code in covers: continue` para decidir se já processou aquele livro. Quando `extract_cover` falha, o código grava `covers[code] = None`, que já é uma chave presente no dicionário. Na prática, uma falha vira permanente: nenhuma execução futura tenta extrair aquela capa de novo, mesmo que a causa tenha sido transitória (ou corrigida, como no caso do DQ-005).
 
 **Causa raiz:** o mesmo padrão já corrigido em `04_translate.py` e presente originalmente em `05_translate_descriptions.py` antes do DQ-001: usar presença de chave como sinônimo de sucesso, em vez de checar o resultado da tentativa anterior. Aqui é mais pobre ainda, porque a falha nem carrega `status`/`reason`, só um `None` sem contexto.
 
-**Pilares afetados:** Data Quality (retry quebrado e ausência de rastreabilidade sobre por que uma capa não foi extraída).
+**Target areas afetadas:** Data Quality (retry quebrado e ausência de rastreabilidade sobre por que uma capa não foi extraída).
 
 **Propagação:** alta e direta. `08_universal_metadata.py:48-49` faz `cover.get("path") if cover else None`, com `cover` igual a `None`, tanto `cover_path` quanto `cover_hash` viram `null` no `universal_metadata.json`, dois campos exigidos pelo case, indistinguíveis de "nunca foi tentado corretamente".
 
@@ -153,7 +153,7 @@ evitar repetir a investigação manual no site caso o mesmo padrão apareça de 
 
 **Causa raiz:** a validação existente é de forma (a chamada retornou algo), não de conteúdo. Como `05_translate_descriptions.py` só olha `status == "Success"` da etapa anterior, uma descrição ruim seria traduzida para EN/ES/FR normalmente, multiplicando o dado de baixa qualidade em 4 idiomas no `localized_catalog.json`, todos marcados como sucesso do início ao fim.
 
-**Pilares afetados:** Data Quality (validação de conteúdo, não só de forma, antes de propagar um dado como confiável).
+**Target areas afetadas:** Data Quality (validação de conteúdo, não só de forma, antes de propagar um dado como confiável).
 
 **Escopo consciente:** validar semanticamente se uma descrição está correta não é viável no prazo do case (isso seria, na prática, outro classificador). A solução aqui é uma heurística barata, não uma prova de qualidade: tamanho mínimo de 40 caracteres e uma lista curta de frases de recusa conhecidas em PT/EN. Reduz o risco, não elimina.
 
@@ -171,7 +171,7 @@ evitar repetir a investigação manual no site caso o mesmo padrão apareça de 
 
 **Causa raiz:** `02_hash.py`, `03_describe.py` e `06_covers.py` descobrem indiretamente que um download falhou, porque procuram por arquivo físico em `PDF_DIR` (nenhum PDF em disco para aquele código, então nunca processam o registro). Mas `04_translate.py` traduz o título direto do `catalog.json`, sem depender de arquivo em disco, então processaria normalmente um livro que nunca baixou (o título em si não corre risco de vir malformado: `parse_listing` só adiciona uma entrada ao catálogo quando `code` e `title` já vêm preenchidos na raspagem da listagem, então esse campo específico nunca é o problema). E `07_localized_catalog.py`/`08_universal_metadata.py` também iteram sobre `catalog` sem checar `downloaded`, montando um registro completo no output final para um livro sem conteúdo algum.
 
-**Pilares afetados:** Data Quality (sinal existente e não utilizado, registro incompleto no pipeline sem rastreabilidade).
+**Target areas afetadas:** Data Quality (sinal existente e não utilizado, registro incompleto no pipeline sem rastreabilidade).
 
 **Propagação (se não corrigido):** um livro que falhou o download apareceria em `localized_catalog.json` e `universal_metadata.json` com a maioria dos campos nulos (hash, capa, descrição) e ainda assim com o título traduzido, indistinguível de qualquer outra causa de nulo (erro de LLM, capa corrompida), sem nenhuma pista de que o problema começou na etapa de download.
 
