@@ -30,7 +30,7 @@ def translate_text(text: str, target_lang: str) -> str | None:
             timeout=60,
         )
         return resp.choices[0].message.content.strip()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 (boundary catch: logged, converted to an explicit Failed status/reason for this record instead of crashing the batch)
         print(f"  LLM error: {e}")
     finally:
         time.sleep(LLM_CALL_DELAY_SECONDS)
@@ -64,11 +64,15 @@ def main():
         title = entry.get("title", code)
 
         if translations.get(code, {}).get("translation_complete"):
-            print(f"[{i + 1}/{len(descriptions)}] {code} — already translated, skipping")
+            print(
+                f"[{i + 1}/{len(descriptions)}] {code} — already translated, skipping"
+            )
             continue
 
         if entry.get("status") != "Success":
-            print(f"[{i + 1}/{len(descriptions)}] {title[:50]}... — skipped (description failed)")
+            print(
+                f"[{i + 1}/{len(descriptions)}] {title[:50]}... — skipped (description failed)"
+            )
             translations[code] = {
                 "status": "Skipped",
                 "reason": "upstream_description_failed",
@@ -86,10 +90,10 @@ def main():
             translated = translate_text(description, lang_name)
             if translated:
                 entry_translations[lang_key] = {
-                "text": translated,
-                "status": "Success",
+                    "text": translated,
+                    "status": "Success",
                 }
-                print(f"  {lang_key}: {translated[:60]}")            
+                print(f"  {lang_key}: {translated[:60]}")
             else:
                 entry_translations[lang_key] = {
                     "text": None,

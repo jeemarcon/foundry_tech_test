@@ -22,7 +22,7 @@ def extract_cover(pdf_path: Path) -> tuple[Path | None, str | None]:
         if not output_path.exists():
             output_path.write_bytes(png_bytes)
         return output_path, img_hash
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 (boundary catch: logged, converted to an explicit Failed status/reason for this record instead of crashing the batch)
         print(f"  Error: {e}")
         return None, None
 
@@ -73,7 +73,11 @@ def main():
         with open(covers_path, "w", encoding="utf-8") as f:
             json.dump(covers, f, ensure_ascii=False, indent=2)
 
-    extracted = sum(1 for v in covers.values() if isinstance(v, dict) and v.get("status") == "Success")
+    extracted = sum(
+        1
+        for v in covers.values()
+        if isinstance(v, dict) and v.get("status") == "Success"
+    )
     print(f"\nDone. {extracted}/{len(covers)} covers extracted.")
     print(f"Output saved to {covers_path}")
 

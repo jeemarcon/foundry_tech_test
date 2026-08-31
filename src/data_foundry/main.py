@@ -7,7 +7,7 @@ from pathlib import Path
 
 SCRIPTS_DIR = Path(__file__).resolve().parent / "scripts"
 
-# Real dependency graph of the pipeline (see ADR 004 in docs/ADR.md). A stage
+# Real dependency graph of the pipeline (see ADR 003 in docs/en/ADR.md or docs/pt/ADR.md). A stage
 # only fires once every stage listed in "depends_on" has finished successfully;
 # stages with no dependency on each other (e.g. hash, describe, translate and
 # covers, which only depend on download) run in parallel. Declared in
@@ -58,7 +58,7 @@ STAGES = {
 # Guards interleaved prints from concurrent stages: each stage's subprocess
 # output is captured and re-printed line by line with a [stage] prefix instead
 # of inheriting stdout directly, so parallel stages don't garble each other's
-# output in the console (see ADR 005).
+# output in the console (see ADR 004).
 _print_lock = threading.Lock()
 
 
