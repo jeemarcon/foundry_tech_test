@@ -111,4 +111,4 @@ Some notable decisions worth highlighting here:
 
 ## AI Assistance
 
-An AI assistant (Claude) was used throughout this project's development, as a pair-programming and documentation partner: discussing trade-offs, reviewing code, drafting and translating documentation, and helping troubleshoot the local environment setup. Every engineering and documentation decision in this project, and the reasoning recorded for it in `docs/`, passed through the author and reflects the author's own judgment.
+An AI assistant (Claude) was used throughout this project's development, as a pair-programming and documentation partner: reviewing code, drafting and translating documentation, and helping troubleshoot the local environment setup. Every engineering and documentation decision in this project, and the reasoning recorded for it in docs/, were made by the author and reflect the author's own judgment.
