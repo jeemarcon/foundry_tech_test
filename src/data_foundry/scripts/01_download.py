@@ -245,11 +245,11 @@ def main():
             if pdf_path.exists():
                 print(f"  Already downloaded: {pdf_path.name}")
                 entry["status"] = "Success"
-                entry["reason"] = None
             else:
                 success, reason = download_pdf(download_url, pdf_path)
                 entry["status"] = "Success" if success else "Failed"
-                entry["reason"] = reason
+                if not success:
+                    entry["reason"] = reason
                 if success:
                     print(
                         f"  Downloaded: {pdf_path.name} ({pdf_path.stat().st_size} bytes)"
